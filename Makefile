@@ -10,8 +10,8 @@ mkdir:
 
 SRC = $(wildcard src/*.c)
 CC = gcc
-FLAGS = -Wall -pipe
-FLAGS += -I"$(CURDIR)/raylib-5.0/src/" -L"$(CURDIR)/target/raylib/" -I"$(CURDIR)/raygui-4.0/" -lraylib -lgdi32 -lwinmm
+FLAGS = -Wall -pipe -std=c2x
+FLAGS += -I"$(CURDIR)/raylib-5.0/src/" -L"$(CURDIR)/target/raylib/" -I"$(CURDIR)/raygui-4.0/" -lraylib -lGL -lm -lpthread -ldl -lrt -lX11
 debug: OUTPUT = $(DEBUG)
 debug: executable
 

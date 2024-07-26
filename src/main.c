@@ -1,6 +1,5 @@
-#include "raylib.h"
-
 #include <stdlib.h>         // Required for: malloc(), free()
+#include <stdio.h>
 #include <math.h>           // Required for: sinf()
 
 #include "raylib.h"
@@ -166,22 +165,22 @@ union Params {
 
 const char *envelope_tostr(enum Envelope_Parameters p) {
     switch (p) {
-    case ENV_TIME: return "ENV_TIME";
-    case ENV_LOOP: return "ENV_LOOP";
-    case ENV_TILT: return "ENV_TILT";
-    case ENV_KF: return "ENV_KF";
+    case ENV_TIME: return "env_time";
+    case ENV_LOOP: return "env_loop";
+    case ENV_TILT: return "env_tilt";
+    case ENV_KF: return "env_kf";
     case VOL_ATK: return "VOL_ATK";
-    case VOL_DCY: return "VOL_DCY";
-    case VOL_SUS: return "VOL_SUS";
-    case VOL_FADE: return "VOL_FADE";
-    case MOD_ATK: return "MOD_ATK";
-    case MOD_DCY: return "MOD_DCY";
-    case MOD_SH: return "MOD_SH";
-    case MOD_VEL: return "MOD_VEL";
-    case LFO_RATE: return "LFO_RATE";
-    case LFO_AMT: return "LFO_AMT";
-    case LFO_BAL: return "LFO_BAL";
-    case LFO_DLY: return "LFO_DLY";
+    case VOL_DCY: return "vol_dcy";
+    case VOL_SUS: return "vol_sus";
+    case VOL_FADE: return "vol_fade";
+    case MOD_ATK: return "mod_atk";
+    case MOD_DCY: return "mod_dcy";
+    case MOD_SH: return "mod_sh";
+    case MOD_VEL: return "mod_vel";
+    case LFO_RATE: return "lfo_rate";
+    case LFO_AMT: return "lfo_amt";
+    case LFO_BAL: return "lfo_bal";
+    case LFO_DLY: return "lfo_dly";
     case ENVELOPE_LEN: return "";
     }
     return "";
@@ -189,21 +188,21 @@ const char *envelope_tostr(enum Envelope_Parameters p) {
 
 const char *oscillator_tostr(enum Oscillator_Parameters p) {
     switch (p) {
-    case A_FORM: return "A_FORM";
-    case A_NOISE: return "A_NOISE";
-    case A_MOD: return "A_MOD";
-    case A_COLOR: return "A_COLOR";
-    case A_FREQ: return "A_FREQ";
-    case FM_MOD: return "FM_MOD";
-    case FM_AMT: return "FM_AMT";
-    case MIX_MOD: return "MIX_MOD";
-    case OSC_MIX: return "OSC_MIX";
-    case B_FORM: return "B_FORM";
-    case B_NOISE: return "B_NOISE";
-    case B_MOD: return "B_MOD";
-    case SUB_AM: return "SUB_AM";
-    case B_FREQ: return "B_FREQ";
-    case B_SH: return "B_SH";
+    case A_FORM: return "a_form";
+    case A_NOISE: return "a_noise";
+    case A_MOD: return "a_mod";
+    case A_COLOR: return "a_color";
+    case A_FREQ: return "a_freq";
+    case FM_MOD: return "fm_mod";
+    case FM_AMT: return "fm_amt";
+    case MIX_MOD: return "mix_mod";
+    case OSC_MIX: return "osc_mix";
+    case B_FORM: return "b_form";
+    case B_NOISE: return "b_noise";
+    case B_MOD: return "b_mod";
+    case SUB_AM: return "sub_am";
+    case B_FREQ: return "b_freq";
+    case B_SH: return "b_sh";
     case OSCILLATOR_LEN: return "";
     }
     return "";
@@ -211,150 +210,60 @@ const char *oscillator_tostr(enum Oscillator_Parameters p) {
 
 const char *filter_tostr(enum Filter_Parameters p) {
     switch (p) {
-    case FLT_TYPE: return "FLT_TYPE";
-    case FLT_Q: return "FLT_Q";
-    case FLT_MOD: return "FLT_MOD";
-    case FLT_SEP: return "FLT_SEP";
-    case FLT_FREQ: return "FLT_FREQ";
-    case FLT_KF: return "FLT_KF";
-    case SATURATE: return "SATURATE";
-    case RVB_MIX: return "RVB_MIX";
-    case RVB_ATK: return "RVB_ATK";
-    case RVB_LEN: return "RVB_LEN";
-    case RVB_DAMP: return "RVB_DAMP";
-    case RVB_CHOR: return "RVB_CHOIR";
-    case RVB_SIZE: return "RVB_SIZE";
-    case ADJ_BASS: return "ADJ_BASS";
-    case ADJ_TREB: return "ADJ_TREB";
-    case ADJ_PAN: return "ADJ_PAN";
-    case ADJ_CLIP: return "ADJ_CLIP";
+    case FLT_TYPE: return "flt_type";
+    case FLT_Q: return "flt_q";
+    case FLT_MOD: return "flt_mod";
+    case FLT_SEP: return "flt_sep";
+    case FLT_FREQ: return "flt_freq";
+    case FLT_KF: return "flt_kf";
+    case SATURATE: return "saturate";
+    case RVB_MIX: return "rvb_mix";
+    case RVB_ATK: return "rvb_atk";
+    case RVB_LEN: return "rvb_len";
+    case RVB_DAMP: return "rvb_damp";
+    case RVB_CHOR: return "rvb_choir";
+    case RVB_SIZE: return "rvb_size";
+    case ADJ_BASS: return "adj_bass";
+    case ADJ_TREB: return "adj_treb";
+    case ADJ_PAN: return "adj_pan";
+    case ADJ_CLIP: return "adj_clip";
     case FILTER_LEN: return "";
     }
     return "";
 }
 
 void write_params(const char* filepath) {
-    const char *s = "{"
-        ".env_time = %.2f,"
-        ".env_loop = %.2f,"
-        ".env_tilt = %.2f,"
-        ".env_kf = %.2f,"
-        ".vol_atk = %.2f,"
-        ".vol_dcy = %.2f,"
-        ".vol_sus = %.2f,"
-        ".vol_fade = %.2f,"
-        ".mod_atk = %.2f,"
-        ".mod_dcy = %.2f,"
-        ".mod_sh = %.2f,"
-        ".mod_vel = %.2f,"
-        ".lfo_rate = %.2f,"
-        ".lfo_amt = %.2f,"
-        ".lfo_bal = %.2f,"
-        ".lfo_dly = %.2f,"
-        ".a_form = %.2f,"
-        ".a_noise = %.2f,"
-        ".a_mod = %.2f,"
-        ".a_color = %.2f,"
-        ".a_freq = %.2f,"
-        ".fm_mod = %.2f,"
-        ".fm_amt = %.2f,"
-        ".mix_mod = %.2f,"
-        ".osc_mix = %.2f,"
-        ".b_form = %.2f,"
-        ".b_noise = %.2f,"
-        ".b_mod = %.2f,"
-        ".sub_am = %.2f,"
-        ".b_freq = %.2f,"
-        ".b_sh = %.2f,"
-        ".flt_type = %.2f,"
-        ".flt_q = %.2f,"
-        ".flt_mod = %.2f,"
-        ".flt_sep = %.2f,"
-        ".flt_freq = %.2f,"
-        ".flt_kf = %.2f,"
-        ".saturate = %.2f,"
-        ".rvb_mix = %.2f,"
-        ".rvb_atk = %.2f,"
-        ".rvb_len = %.2f,"
-        ".rvb_damp = %.2f,"
-        ".rvb_chor = %.2f,"
-        ".rvb_size = %.2f,"
-        ".adj_bass = %.2f,"
-        ".adj_treb = %.2f,"
-        ".adj_pan = %.2f,"
-        ".adj_clip = %.2f,"
-        ".params_len = %.2f,"
-        "}"
-        "\n";
-    
-    FILE *fp;
-    errno_t err = fopen_s(&fp, filepath, "w");
-    if (!err) {
-        fprintf(fp, s,
-                params.env_time,
-                params.env_loop,
-                params.env_tilt,
-                params.env_kf,
-                params.vol_atk,
-                params.vol_dcy,
-                params.vol_sus,
-                params.vol_fade,
-                params.mod_atk,
-                params.mod_dcy,
-                params.mod_sh,
-                params.mod_vel,
-                params.lfo_rate,
-                params.lfo_amt,
-                params.lfo_bal,
-                params.lfo_dly,
-                params.a_form,
-                params.a_noise,
-                params.a_mod,
-                params.a_color,
-                params.a_freq,
-                params.fm_mod,
-                params.fm_amt,
-                params.mix_mod,
-                params.osc_mix,
-                params.b_form,
-                params.b_noise,
-                params.b_mod,
-                params.sub_am,
-                params.b_freq,
-                params.b_sh,
-                params.flt_type,
-                params.flt_q,
-                params.flt_mod,
-                params.flt_sep,
-                params.flt_freq,
-                params.flt_kf,
-                params.saturate,
-                params.rvb_mix,
-                params.rvb_atk,
-                params.rvb_len,
-                params.rvb_damp,
-                params.rvb_chor,
-                params.rvb_size,
-                params.adj_bass,
-                params.adj_treb,
-                params.adj_pan,
-                params.adj_clip,
-                params.params_len
-            );
+    FILE *fp = fopen(filepath, "w");
+    if (fp) {
+        fputc('{', fp);
+        
+        for (int i = 0; i < ENVELOPE_LEN; ++i) {
+            fprintf(fp, ".%s = %.2f,", envelope_tostr(i), params.env[i]);
+        }
+
+        for (int i = 0; i < OSCILLATOR_LEN; ++i) {
+            fprintf(fp, ".%s = %.2f,", oscillator_tostr(i), params.osc[i]);
+        }
+
+        for (int i = 0; i < FILTER_LEN; ++i) {
+            fprintf(fp, ".%s = %.2f,", filter_tostr(i), params.fil[i]);
+        }
+
+        fprintf(fp, "}\n");
+        
+        fclose(fp);
     } else {
-        fprintf(stderr, "ERR: %d\n", err);
+        fprintf(stderr, "Could not open: %s\n", filepath);
     }
     
-    fclose(fp);
+    
 }
 
 void read_params(const char *filepath) {
-    FILE* fp;
     int idx = 0;
-    char buf[6] = {0};
-    errno_t err = fopen_s(&fp, filepath, "r");
-    printf("%s", "Reading params ... \n");
-    if (!err && fp) {
+    FILE *fp = fopen(filepath, "r");
+    printf("%s", "Reading params ... ");
+    if (fp) {
         char c = fgetc(fp);
         if (c != '{') {
             printf("%s", "The file is wrong!\n");
@@ -366,12 +275,10 @@ void read_params(const char *filepath) {
                     c = fgetc(fp); // consume space
 
                     float n;
-                    int result = fscanf_s(fp, "%f", &n);
+                    int result = fscanf(fp, "%f", &n);
                     if (result == EOF) {
-                        printf("Bad number %s\n", buf);
+                        printf("Bad number\n");
                         break;
-                    } else {
-                        printf("Got %f \n", n);
                     }
                     params.p[idx] = n; 
                     idx += 1;
@@ -383,11 +290,11 @@ void read_params(const char *filepath) {
                 }
             }
         }
-    } else {
-        printf("Can't read file: %d\n", err);
-    }
 
-    fclose(fp);
+        fclose(fp);
+    } else {
+        printf("Can't read file\n");
+    }
 }
 
 float identity(float x) { return x; }
@@ -481,11 +388,6 @@ float chain(float x) {
 void DrawPlot(Rectangle bounds, float *data, Color color) {
     GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
 
-    /* bounds.width -= 1; */
-    /* /\* bounds.height += 1; *\/ */
-    /* bounds.y -= 1; */
-    /* bounds.x += 1; */
-
     Vector2 pv = {.x = bounds.x, .y = bounds.y + bounds.height - (bounds.height / screenHeight) * data[0] };
     Vector2 v = pv;
     for (int i = 1; i < bounds.width; ++i) {
@@ -516,8 +418,8 @@ int main(int argc, char *argv[]) {
     read_params(filepath);
         
     InitWindow(screenWidth, screenHeight, "raylib [audio] example - raw audio streaming");
-    int h_fps = 144;
-    int l_fps = 6;
+    int h_fps = GetMonitorRefreshRate(GetCurrentMonitor());
+    int l_fps = h_fps / 6;
     int cur_fps = h_fps;
     SetTargetFPS(cur_fps);
 
