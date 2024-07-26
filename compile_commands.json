@@ -1,0 +1,5 @@
+[
+    { "directory": "C:/Users/Nathan/Documents/Github/subsynth/",
+      "arguments": ["clang.exe", "-Wall", "-pipe", "-I./raylib-5.0/src/", "-L./target/raylib/", "-I./raygui-4.0/", "-lraylib", "-lgdi32", "-lwinmm" ]
+    "file": "src/main.c" },
+]

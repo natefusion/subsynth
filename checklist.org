@@ -1,0 +1,33 @@
+* Envelope
+** TODO env_time
+** TODO env_loop
+** TODO env_tilt
+** TODO env_kf
+** TODO vol_atk
+** TODO vol_dcy
+** TODO vol_sus
+** TODO vol_fade
+** TODO mod_atk
+** TODO mod_dcy
+** TODO mod_sh
+** TODO mod_vel
+** DONE lfo_rate
+** DONE lfo_amt
+** DONE lfo_bal
+** DONE lfo_dly
+* Oscillators
+** DONE a_form
+** DONE a_noise
+** TODO a_mod
+** DONE a_freq
+** TODO fm_mod
+** TODO fm_amt
+** TODO mix_mod
+** TODO osc_mix
+** DONE b_form
+** TODO b_noise
+** TODO b_mod
+** TODO sub_am
+** DONE b_freq
+** TODO b_sh
+* Filter & Effects
