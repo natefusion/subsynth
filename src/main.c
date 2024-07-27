@@ -433,7 +433,8 @@ float oscillator_b(float x) {
 }
 
 float chain(float x) {
-    return (1.0f - params.osc_mix) * oscillator_a(x) + params.osc_mix * oscillator_b(x);
+    float a = (1.0f - params.osc_mix) * oscillator_a(x) + params.osc_mix * oscillator_b(x);
+    return (volume_lfo(x) + 1.0f) * a;
 }
 
 void AudioInputCallback(void *buffer, unsigned int frames) {
@@ -442,7 +443,7 @@ void AudioInputCallback(void *buffer, unsigned int frames) {
     for (unsigned int i = 0; i < frames; ++i) {
         d[i] = (short)(chain(time_seconds) * 32000.0f);
         time_seconds += 1.0f / sample_rate;
-        if (time_seconds > length_seconds) time_seconds = length_seconds;
+        if (time_seconds > length_seconds) time_seconds = 0.18f;
     }
 }
 
@@ -499,7 +500,7 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
             fontsize = 20;
         }
         float value_at_point = meta->signal.data[(int)(i * w_ratio)];
-        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", time_seconds + i/meta->signal.sample_rate, value_at_point, i, (int)h_offset - my - 1);
+        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", time_seconds + (i*w_ratio*meta->w_scale)/meta->signal.sample_rate, value_at_point, i, (int)h_offset - my - 1);
         int len = MeasureText(t, fontsize);
 
         int ypos = my - fontsize;
@@ -513,7 +514,8 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     Vector2 pv = {0};
     Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->signal.data[0] + meta->h_shift), bounds.y, h_offset) };
     for (int i = 1; i < bounds.width; ++i) {
-        float y = meta->signal.data[(int)(i * w_ratio)] + meta->h_shift;
+        int x = (int)(i * w_ratio);
+        float y = meta->signal.data[x] + meta->h_shift;
         pv = v;
         v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
         DrawLineEx(pv, v, 2, color);
@@ -524,7 +526,7 @@ void pm_apply(struct Plot_Metadata *pm) {
     float x = time_seconds;
     for (int i = 0; i < pm->signal.capacity; ++i) {
         x += 1.0f / pm->signal.sample_rate;
-        pm->signal.data[i] = pm->func(x * pm->w_scale) * pm->h_scale;
+        pm->signal.data[i] = pm->func(x * pm->w_scale);
     }
 }
 
@@ -538,6 +540,7 @@ int main(int argc, char *argv[]) {
     SetAudioStreamBufferSizeDefault(MAX_SAMPLES_PER_UPDATE);
     AudioStream stream = LoadAudioStream(44100, 16, 1);
     SetAudioStreamCallback(stream, AudioInputCallback);
+    SetAudioStreamVolume(stream, volume);
     
     int h_fps = GetMonitorRefreshRate(GetCurrentMonitor());
     int l_fps = h_fps / 6;
@@ -759,7 +762,16 @@ int main(int argc, char *argv[]) {
         top.width = 125;
         GuiSliderBar(top, "Time", TextFormat("%.1fs", time_seconds), &time_seconds, 0.0f, length_seconds);
 
-        DrawText(playing ? "Playing" : "Not Playing", screenWidth - 65, top.y + 5, 10, GRAY);
+        if (GuiLabelButton((Rectangle) { .x = screenWidth - 65, .y = top.y + 5, .height = 10 }, playing ? "Playing" : "Not Playing")) {
+            playing = !playing;
+            if (playing) {
+                PlayAudioStream(stream);
+            } else {
+                PauseAudioStream(stream);
+            }
+        }
+
+        /* DrawText(playing ? "Playing" : "Not Playing", screenWidth - 65, top.y + 5, 10, GRAY); */
 
         switch (page) {
         case ENVELOPE: {
