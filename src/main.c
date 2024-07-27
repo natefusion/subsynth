@@ -11,6 +11,8 @@
 
 #define TO_STR(x) #x
 
+#define TAU (2*PI)
+
 float midi_f0 = 60.0f;
 float frequency = 8.0f;
 float amplitude = 32000.0f;
@@ -295,11 +297,60 @@ void read_params(const char *filepath) {
     }
 }
 
+typedef struct {
+    float *data;
+    int size;
+    int capacity;
+    float sample_rate;
+} Signal;
+
+Signal scratch = {0};
+
 float identity(float x) { return x; }
 float map(float x, float in_min, float in_max, float out_min, float out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
 
 float midi_to_hz(float midi) {
     return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f;
+}
+
+float clampf(float x, float min, float max) {
+    if (x < min) return min;
+    else if (x > max) return max;
+    else return x;
+}
+
+void make_vco_argument(float midi_f0, Signal *s) {
+    if (s->size == 0) {
+        s->data[0] = midi_to_hz(midi_f0);
+        s->size = s->capacity;
+        float prev = 0;
+        for (int i = 1; i < s->size; ++i) {
+            float cur = prev + TAU * s->data[0] / s->sample_rate;
+            s->data[i] = cur;
+            prev = cur;
+        }
+    } else {
+        int mod_depth = 0; // me no understand purpose
+        float prev = 0;
+        for (int i = 0; i < s->size; ++i) {
+            float cur = prev + TAU * midi_to_hz(clampf(midi_f0 + mod_depth*s->data[i], 0.0f, 127.0f)) / s->sample_rate;
+            s->data[i] = cur;
+            prev = cur;
+        }
+    }
+}
+
+void square_saw(float midi_f0, Signal *argument) {
+    make_vco_argument(midi_f0, argument);
+    
+    // mod_depth is used here too in torchsynth
+    float max_f0 = midi_to_hz(midi_f0);
+    float partials = 12000 / (max_f0 * log10f(max_f0));
+    
+    for (int i = 0; i < argument->size; ++i) {
+        float square = tanhf(PI * partials * sinf(argument->data[i]) / 2.0f);
+        argument->data[i] = (screenHeight/2.0f)*(1 - params.a_form / 2.0f) * square * (1.0f + params.a_form * cosf(argument->data[i]));
+    }
 }
 
 float volume_envelope(float x) {
@@ -395,25 +446,6 @@ void AudioInputCallback(void *buffer, unsigned int frames) {
     }
 }
 
-void DrawPlot(Rectangle bounds, const char *title, float *data, Color color) {
-    GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
-    DrawText(title, bounds.x + 2, bounds.y + 2, 10, GRAY);
-
-    Vector2 pv = {.x = bounds.x, .y = bounds.y + bounds.height - (bounds.height / screenHeight) * data[0] };
-    Vector2 v = pv;
-    for (int i = 1; i < bounds.width; ++i) {
-        int x = i * screenWidth / bounds.width;
-        float y = data[x];
-        pv.x = v.x;
-        pv.y = v.y;
-        v.x = bounds.x + i;
-        v.y = bounds.y + bounds.height - (bounds.height / screenHeight)*y;
-        if (v.y < bounds.y) v.y = bounds.y;
-        if (v.y > bounds.y + bounds.height) v.y = bounds.y + bounds.height;
-        DrawLine(pv.x, pv.y, v.x, v.y, color);
-    }
-}
-
 enum Plot_Data {
     PLOT_ONE,
     PLOT_TWO,
@@ -447,6 +479,25 @@ struct Plots {
     struct Plot_Metadata mixed;
 };
 
+void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
+    GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
+    DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
+
+    Vector2 pv = {.x = bounds.x, .y = bounds.y + bounds.height - (bounds.height / screenHeight) * meta->data[0] };
+    Vector2 v = pv;
+    for (int i = 1; i < bounds.width; ++i) {
+        int x = i * screenWidth / bounds.width;
+        float y = meta->data[x];
+        pv.x = v.x;
+        pv.y = v.y;
+        v.x = bounds.x + i;
+        v.y = bounds.y + bounds.height - (bounds.height / screenHeight)*y;
+        if (v.y < bounds.y) v.y = bounds.y;
+        if (v.y > bounds.y + bounds.height) v.y = bounds.y + bounds.height;
+        DrawLine(pv.x, pv.y, v.x, v.y, color);
+    }
+}
+
 void pm_apply(struct Plot_Metadata *pm, int i) {
     pm->data[i] = (pm->func((float)i * pm->w_scale) + pm->h_shift) * pm->h_scale;;
 }
@@ -467,6 +518,10 @@ int main(int argc, char *argv[]) {
     int cur_fps = h_fps;
     SetTargetFPS(cur_fps);
 
+
+    scratch.data = (float*)calloc((int)(sample_rate*length_seconds), sizeof(float));
+    scratch.capacity = (int)(sample_rate*length_seconds);
+    scratch.size = 0;
     float *buffer = (float*)calloc((int)(screenWidth*MAX_PLOTS), sizeof(float));
     float *plot[MAX_PLOTS];
     for (int i = 0; i < MAX_PLOTS; ++i) {
@@ -686,19 +741,19 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, plot_meta.volume_envelope.name, plot_meta.volume_envelope.data, RED);
+            DrawPlot(r, &plot_meta.volume_envelope, RED);
 
             r.y += r.height + 2;
-            DrawPlot(r, plot_meta.modulation_envelope.name, plot_meta.modulation_envelope.data, RED);
+            DrawPlot(r, &plot_meta.modulation_envelope, RED);
 
-            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, plot_meta.mixed.name, plot_meta.mixed.data, RED);
+            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed, RED);
 
             r.y += r.height + 2;
             r.height /= 2;
-            DrawPlot(r, plot_meta.pitch_lfo.name, plot_meta.pitch_lfo.data, RED);
+            DrawPlot(r, &plot_meta.pitch_lfo, RED);
 
             r.y += r.height + 2;
-            DrawPlot(r, plot_meta.volume_lfo.name, plot_meta.volume_lfo.data, RED);
+            DrawPlot(r, &plot_meta.volume_lfo, RED);
         } break;
         case OSCILLATOR: {
             for (int i = 0; i < OSCILLATOR_LEN; ++i) {
@@ -711,13 +766,13 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, plot_meta.oscillator_a.name, plot_meta.oscillator_a.data, RED);
+            DrawPlot(r, &plot_meta.oscillator_a, RED);
 
             r.y += r.height + 2;
-            DrawPlot(r, plot_meta.oscillator_b.name, plot_meta.oscillator_b.data, RED);
+            DrawPlot(r, &plot_meta.oscillator_b, RED);
 
             r.x += r.width + 2;
-            DrawPlot(r, plot_meta.mixed.name, plot_meta.mixed.data, RED);
+            DrawPlot(r, &plot_meta.mixed, RED);
         } break;
         case FILTER: {
             for (int i = 0; i < FILTER_LEN; ++i) {
@@ -730,19 +785,19 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, plot_meta.filter.name, plot_meta.filter.data, RED);
+            DrawPlot(r, &plot_meta.filter, RED);
 
             r.y += r.height + 2;
-            DrawPlot(r, "Saturation", plot[PLOT_TWO], RED);
+            DrawPlot(r, &plot_meta.saturation, RED);
 
-            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, plot_meta.mixed.name, plot_meta.mixed.data, RED);
+            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed, RED);
 
             r.y += r.height + 2;
             r.height /= 2;
-            DrawPlot(r, plot_meta.reverb.name, plot_meta.reverb.data, RED);
+            DrawPlot(r, &plot_meta.reverb, RED);
 
             r.y += r.height + 2;
-            DrawPlot(r, plot_meta.adjust.name, plot_meta.adjust.data, RED);
+            DrawPlot(r, &plot_meta.adjust, RED);
         } break;
         case MIXED: {
             r.x = 2;
@@ -750,7 +805,7 @@ int main(int argc, char *argv[]) {
             r.width = screenWidth - 4;
             r.height = screenHeight - 24;
 
-            DrawPlot(r, plot_meta.mixed.name, plot_meta.mixed.data, RED);
+            DrawPlot(r, &plot_meta.mixed, RED);
         } break;
         }
 
