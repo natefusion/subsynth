@@ -15,9 +15,9 @@
 
 float midi_f0 = 60.0f;
 float frequency = 8.0f;
-float amplitude = 32000.0f;
 float sample_rate = 44100.0f;
 float length_seconds = 4.0f;
+float time_seconds = 0.0f;
 float volume = 0.05;
 float sineIdx = 0.0f; // Index for audio rendering
 int screenWidth = 1000;
@@ -306,17 +306,17 @@ typedef struct {
 
 Signal scratch = {0};
 
+float clampf(float x, float min, float max) {
+    if (x < min) return min;
+    else if (x > max) return max;
+    else return x;
+}
+
 float identity(float x) { return x; }
 float map(float x, float in_min, float in_max, float out_min, float out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
 
 float midi_to_hz(float midi) {
     return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f;
-}
-
-float clampf(float x, float min, float max) {
-    if (x < min) return min;
-    else if (x > max) return max;
-    else return x;
 }
 
 void make_vco_argument(float midi_f0, Signal *s) {
@@ -400,28 +400,28 @@ float volume_lfo(float x) {
     x = x * (1.0f + params.lfo_rate);
     float triangle = 4.0f * fabsf(x - floorf(x + 0.5f)) - 1.0f;
 
-    float y = amplitude * triangle;
-
-    if (y < -1.0f) y = -1.0f;
-    if (y > 1.0f) y = 1.0f;
-    return y;
+    return clampf(amplitude * triangle, -1.0f, 1.0f);
 }
 
 float oscillator(float x, float form) {
+    float partials = 12000.0f / (frequency * log10f(frequency));
     if (form >= 0 && form <= 0.57) {
-        float sinx = sinf(2.0f * PI * frequency * x);
-        float sawx = tanhf(PI * sinf(frequency * x) / 2.0f) * (1.0f + cosf(frequency * x)) / 2.0f;
+        float sinx = sinf(TAU * frequency * x);
+        float sawx = tanhf(PI * partials * sinf(TAU * frequency * x)) * (1.0f + cosf(TAU * frequency * x)) / 2.0f;
         float i = map(form, 0.0f, 0.57f, 0.0f, 1.0f);
         return (1 - i) * sinx + i * sawx;
-    } else if (form > 0.57 && form <= 0.81) {
-        float shape = 1.0f - map(form, 0.57f, 0.81f, 0.0f, 1.0f);
-        return (1.0f - shape / 2.0f) * tanhf(PI * sin(frequency * x) / 2.0f) * (1.0f + shape * cosf(frequency * x));
-    } else {
-        float duty = 1.0f - map(form, 0.81f, 1.0f, 0.0f, 1.0f);
-        return tanhf(2.0f * PI *
-                     (tanhf(PI * sinf(frequency *  x)              / 2.0f) * (1.0f + cosf(frequency *  x))             / 2.0f) -
-                     (tanhf(PI * sinf(frequency * (x - PI * duty)) / 2.0f) * (1.0f + cosf(frequency * (x - PI * duty)) / 2.0f)));
+    } else /* if (form > 0.57 && form <= 0.81) */ {
+        float shape = 1.0f - map(form, 0.57f, 1.0f/* 0.81f */, 0.0f, 1.0f);
+        float square = tanh(PI * partials * sinf(TAU * frequency * x) / 2.0f);
+        return (1.0f - shape / 2.0f) * square * (1.0f + shape * cosf(TAU * frequency * x));
     }
+    /* else { */
+    /*     float duty = map(form, 0.81f, 1.0f, 0.0f, 1.0f); */
+    /*     float a = tanhf(PI * partials * sinf(TAU * frequency * x)) / 2.0f; */
+    /*     float sawa = a * (1.0f + cosf(TAU * frequency * x)); */
+    /*     float sawb = a * (1.0f + cosf(TAU * frequency * x + duty/4.0f)); */
+    /*     return tanh(TAU * partials * (sawa - sawb)); */
+    /* } */
 }
 
 float oscillator_a(float x) {
@@ -433,16 +433,16 @@ float oscillator_b(float x) {
 }
 
 float chain(float x) {
-    return (1.0f - params.osc_mix) * oscillator(x, params.a_form) + params.osc_mix * oscillator(x, params.b_form);
+    return (1.0f - params.osc_mix) * oscillator_a(x) + params.osc_mix * oscillator_b(x);
 }
 
 void AudioInputCallback(void *buffer, unsigned int frames) {
     short *d = (short *)buffer;
 
-    for (unsigned int i = 0; i < frames; i++) {
-        d[i] = (short)(chain(sineIdx) * amplitude);
-        sineIdx += 1/sample_rate;
-        if (sineIdx > 1.0f) sineIdx = 0.0f;
+    for (unsigned int i = 0; i < frames; ++i) {
+        d[i] = (short)(chain(time_seconds) * 32000.0f);
+        time_seconds += 1.0f / sample_rate;
+        if (time_seconds > length_seconds) time_seconds = length_seconds;
     }
 }
 
@@ -458,7 +458,7 @@ enum Plot_Data {
 struct Plot_Metadata {
     char *name;
     float (*func)(float);
-    float *data;
+    Signal signal;
     float h_scale;
     float w_scale;
     float h_shift;
@@ -482,24 +482,49 @@ struct Plots {
 void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
     DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
+    GuiSliderBar((Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height - 13, .width = 100, .height = 10 }, "-", TextFormat("(w) %.4f", meta->w_scale), &meta->w_scale, 1.0f, 100.0f);
 
-    Vector2 pv = {.x = bounds.x, .y = bounds.y + bounds.height - (bounds.height / screenHeight) * meta->data[0] };
-    Vector2 v = pv;
+    float h_offset = bounds.y + bounds.height;
+    float h_ratio = bounds.height / 4.0f;
+    float w_ratio = meta->signal.capacity / bounds.width;
+    Vector2 pv = {0};
+    Vector2 v = {.x = bounds.x, .y = h_offset - h_ratio * meta->signal.data[0] };
+
+
+    Vector2 mp = GetMousePosition();
+    int mx = (int)mp.x;
+    int my = (int)mp.y;
+    if (CheckCollisionPointRec(mp, bounds)) {
+        int xpos = mx + 1;
+        int i = mx - (int)bounds.x;
+        float value_at_point = meta->signal.data[(int)(i * w_ratio)];
+        const char *t = TextFormat("(%.3f) (%d, %d)", value_at_point, i, (int)h_offset - my - 1);
+        int len = MeasureText(t, 10);
+
+        int ypos = my - 10;
+        if (ypos < bounds.y + 1) ypos = bounds.y + 1;
+        DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
+        
+        xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
+        DrawText(t, xpos, ypos, 10, GRAY);
+
+    }
+
     for (int i = 1; i < bounds.width; ++i) {
-        int x = i * screenWidth / bounds.width;
-        float y = meta->data[x];
-        pv.x = v.x;
-        pv.y = v.y;
-        v.x = bounds.x + i;
-        v.y = bounds.y + bounds.height - (bounds.height / screenHeight)*y;
-        if (v.y < bounds.y) v.y = bounds.y;
-        if (v.y > bounds.y + bounds.height) v.y = bounds.y + bounds.height;
-        DrawLine(pv.x, pv.y, v.x, v.y, color);
+        float y = meta->signal.data[(int)(i * w_ratio)] + meta->h_shift;
+        pv = v;
+        v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
+        DrawLineV(pv, v, color);
+        DrawPixelV(v, BLUE);
     }
 }
 
-void pm_apply(struct Plot_Metadata *pm, int i) {
-    pm->data[i] = (pm->func((float)i * pm->w_scale) + pm->h_shift) * pm->h_scale;;
+void pm_apply(struct Plot_Metadata *pm) {
+    float x = time_seconds;
+    for (int i = 0; i < pm->signal.capacity; ++i) {
+        x += 1.0f / pm->signal.sample_rate;
+        pm->signal.data[i] = pm->func(x * pm->w_scale) * pm->h_scale;
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -518,123 +543,121 @@ int main(int argc, char *argv[]) {
     int cur_fps = h_fps;
     SetTargetFPS(cur_fps);
 
-
-    scratch.data = (float*)calloc((int)(sample_rate*length_seconds), sizeof(float));
-    scratch.capacity = (int)(sample_rate*length_seconds);
-    scratch.size = 0;
     float *buffer = (float*)calloc((int)(screenWidth*MAX_PLOTS), sizeof(float));
-    float *plot[MAX_PLOTS];
+    Signal plot[MAX_PLOTS];
     for (int i = 0; i < MAX_PLOTS; ++i) {
-        plot[i] = buffer + screenWidth * i;
+        plot[i] = (Signal) {
+            .data = buffer + screenWidth * i,
+            .sample_rate = sample_rate,
+            .size = screenWidth,
+            .capacity = screenWidth,
+        };
     }
 
     struct Plots plot_meta = {
         .volume_envelope = {
             .name = "Volume Envelope",
             .func = volume_envelope,
-            .data = plot[PLOT_ONE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
-            .h_shift = 2.0f,
-            .w_shift = 0,
+            .signal = plot[PLOT_ONE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
-            .data = plot[PLOT_TWO],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
-            .h_shift = 2.0f,
-            .w_shift = 0,
+            .signal = plot[PLOT_TWO],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
-            .func = modulation_envelope,
-            .data = plot[PLOT_THREE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .func = pitch_lfo,
+            .signal = plot[PLOT_THREE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .volume_lfo =  {
             .name = "Volume LFO",
-            .func = modulation_envelope,
-            .h_scale = screenHeight / 4.0f,
-            .data = plot[PLOT_FOUR],
-            .w_scale = 4.0f / screenWidth,
+            .func = volume_lfo,
+            .h_scale = 1.0f,
+            .signal = plot[PLOT_FOUR],
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .oscillator_a =  {
             .name = "Oscillator A",
             .func = oscillator_a,
-            .data = plot[PLOT_ONE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_ONE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .oscillator_b =  {
             .name = "Oscillator B",
             .func = oscillator_b,
-            .data = plot[PLOT_TWO],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_TWO],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .filter = {
             .name = "Filter",
             .func = identity,
-            .data = plot[PLOT_ONE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_ONE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .saturation = {
             .name = "Saturation",
             .func = identity,
-            .data = plot[PLOT_TWO],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_TWO],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .reverb = {
             .name = "Reverb",
             .func = identity,
-            .data = plot[PLOT_THREE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_THREE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .adjust = {
             .name = "Adjust",
             .func = identity,
-            .data = plot[PLOT_FOUR],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_FOUR],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .mixed = {
             .name = "Mixed",
             .func = chain,
-            .data = plot[PLOT_FIVE],
-            .h_scale = screenHeight / 4.0f,
-            .w_scale = 4.0f / screenWidth,
+            .signal = plot[PLOT_FIVE],
+            .h_scale = 1.0f,
+            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         }
     };
 
-    enum Page page = ENVELOPE;
-    enum Page prevPage = ENVELOPE;
+    enum Page page = MIXED;
+    enum Page prevPage = page;
     bool redraw = true;
     bool playing = false;
-    
+
+    frequency = midi_to_hz(floorf(midi_f0));
 
     while (!WindowShouldClose()) {
         /* Update */
@@ -657,54 +680,59 @@ int main(int argc, char *argv[]) {
 
         if (IsKeyPressed(KEY_SPACE)) {
             playing = !playing;
+
+            if (time_seconds == length_seconds) {
+                time_seconds = 0.0f;
+            }
+
+            if (playing) {
+                PlayAudioStream(stream);
+            } else {
+                PauseAudioStream(stream);
+            }
         }
 
         if (playing) {
-            PlayAudioStream(stream);
-        } else {
+            redraw = true;
+        }
+        
+        if (time_seconds == length_seconds) {
             PauseAudioStream(stream);
+            playing = false;
         }
 
         switch (page) {
         case ENVELOPE: {
             if (redraw) {
-                for (int i = 0; i < screenWidth; ++i) {
-                    pm_apply(&plot_meta.volume_envelope, i);
-                    pm_apply(&plot_meta.modulation_envelope, i);
-                    pm_apply(&plot_meta.pitch_lfo, i);
-                    pm_apply(&plot_meta.volume_lfo, i);
-                    pm_apply(&plot_meta.mixed, i);
-                }
+                pm_apply(&plot_meta.volume_envelope);
+                pm_apply(&plot_meta.modulation_envelope);
+                pm_apply(&plot_meta.pitch_lfo);
+                pm_apply(&plot_meta.volume_lfo);
+                pm_apply(&plot_meta.mixed);
                 redraw = false;
             }
         } break;
         case OSCILLATOR: {
             if (redraw) {
-                for (int i = 0; i < screenWidth; ++i) {
-                    pm_apply(&plot_meta.oscillator_a, i);
-                    pm_apply(&plot_meta.oscillator_b, i);
-                    pm_apply(&plot_meta.mixed, i);
-                }
+                pm_apply(&plot_meta.oscillator_a);
+                pm_apply(&plot_meta.oscillator_b);
+                pm_apply(&plot_meta.mixed);
                 redraw = false;
             }
         } break;
         case FILTER: {
             if (redraw) {
-                for (int i = 0; i < screenWidth; ++i) {
-                    pm_apply(&plot_meta.filter, i);
-                    pm_apply(&plot_meta.reverb, i);
-                    pm_apply(&plot_meta.saturation, i);
-                    pm_apply(&plot_meta.adjust, i);
-                    pm_apply(&plot_meta.mixed, i);
-                }
+                pm_apply(&plot_meta.filter);
+                pm_apply(&plot_meta.reverb);
+                pm_apply(&plot_meta.saturation);
+                pm_apply(&plot_meta.adjust);
+                pm_apply(&plot_meta.mixed);
                 redraw = false;
             }
         } break;
         case MIXED: {
             if (redraw) {
-                for (int i = 0; i < screenWidth; ++i) {
-                    pm_apply(&plot_meta.mixed, i);
-                }
+                pm_apply(&plot_meta.mixed);
                 redraw = false;
             }
         } break;
@@ -726,6 +754,10 @@ int main(int argc, char *argv[]) {
         
         GuiSlider(top, TextFormat("%.0f", midi_f0), "Frequency", &midi_f0, 0.0f, 127.0f);
         frequency = midi_to_hz(floorf(midi_f0));
+
+        top.x += top.width + 90;
+        top.width = 125;
+        GuiSliderBar(top, "Time", TextFormat("%.1fs", time_seconds), &time_seconds, 0.0f, length_seconds);
 
         DrawText(playing ? "Playing" : "Not Playing", screenWidth - 65, top.y + 5, 10, GRAY);
 
