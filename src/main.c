@@ -487,9 +487,6 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     float h_offset = bounds.y + bounds.height;
     float h_ratio = bounds.height / 4.0f;
     float w_ratio = meta->signal.capacity / bounds.width;
-    Vector2 pv = {0};
-    Vector2 v = {.x = bounds.x, .y = h_offset - h_ratio * meta->signal.data[0] };
-
 
     Vector2 mp = GetMousePosition();
     int mx = (int)mp.x;
@@ -497,25 +494,29 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     if (CheckCollisionPointRec(mp, bounds)) {
         int xpos = mx + 1;
         int i = mx - (int)bounds.x;
+        int fontsize = 10;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            fontsize = 20;
+        }
         float value_at_point = meta->signal.data[(int)(i * w_ratio)];
-        const char *t = TextFormat("(%.3f) (%d, %d)", value_at_point, i, (int)h_offset - my - 1);
-        int len = MeasureText(t, 10);
+        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", time_seconds + i/meta->signal.sample_rate, value_at_point, i, (int)h_offset - my - 1);
+        int len = MeasureText(t, fontsize);
 
-        int ypos = my - 10;
+        int ypos = my - fontsize;
         if (ypos < bounds.y + 1) ypos = bounds.y + 1;
         DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
         
         xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
-        DrawText(t, xpos, ypos, 10, GRAY);
-
+        DrawText(t, xpos, ypos, fontsize, GRAY);
     }
 
+    Vector2 pv = {0};
+    Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->signal.data[0] + meta->h_shift), bounds.y, h_offset) };
     for (int i = 1; i < bounds.width; ++i) {
         float y = meta->signal.data[(int)(i * w_ratio)] + meta->h_shift;
         pv = v;
         v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
-        DrawLineV(pv, v, color);
-        DrawPixelV(v, BLUE);
+        DrawLineEx(pv, v, 2, color);
     }
 }
 
@@ -560,30 +561,29 @@ int main(int argc, char *argv[]) {
             .func = volume_envelope,
             .signal = plot[PLOT_ONE],
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
+            .w_scale = 100.0f,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
             .signal = plot[PLOT_TWO],
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
+            .w_scale = 100.0f,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
             .func = pitch_lfo,
             .signal = plot[PLOT_THREE],
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
+            .w_scale = 100.0f,
             .h_shift = 2.0f,
-            .w_shift = 0,
         },
         .volume_lfo =  {
             .name = "Volume LFO",
             .func = volume_lfo,
             .h_scale = 1.0f,
             .signal = plot[PLOT_FOUR],
-            .w_scale = 1.0f,
+            .w_scale = 100.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
