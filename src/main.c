@@ -1,4 +1,3 @@
-#include <stdlib.h>         // Required for: malloc(), free()
 #include <stdio.h>
 #include <math.h>           // Required for: sinf()
 
@@ -18,8 +17,7 @@ float frequency = 8.0f;
 float sample_rate = 44100.0f;
 float length_seconds = 4.0f;
 float time_seconds = 0.0f;
-float volume = 0.05;
-float sineIdx = 0.0f; // Index for audio rendering
+float volume = 0.2f;
 int screenWidth = 1000;
 int screenHeight = 1000;
 
@@ -459,9 +457,9 @@ enum Plot_Data {
 struct Plot_Metadata {
     char *name;
     float (*func)(float);
-    Signal signal;
+    /* Signal signal; */
+    float seconds_per_plot;
     float h_scale;
-    float w_scale;
     float h_shift;
     int w_shift;
 };
@@ -483,12 +481,14 @@ struct Plots {
 void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
     DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
-    GuiSliderBar((Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height - 13, .width = 100, .height = 10 }, "-", TextFormat("(w) %.4f", meta->w_scale), &meta->w_scale, 1.0f, 100.0f);
+    GuiSliderBar((Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height - 13, .width = 100, .height = 10 },
+                 "-", TextFormat("(w) %.4f", meta->seconds_per_plot), &meta->seconds_per_plot, 0.001f, length_seconds);
 
     float h_offset = bounds.y + bounds.height;
     float h_ratio = bounds.height / 4.0f;
-    float w_ratio = meta->signal.capacity / bounds.width;
-
+    float seconds_per_pixel = meta->seconds_per_plot / bounds.width;
+    float end = fmodf(time_seconds, meta->seconds_per_plot) / seconds_per_pixel;
+    
     Vector2 mp = GetMousePosition();
     int mx = (int)mp.x;
     int my = (int)mp.y;
@@ -499,35 +499,30 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             fontsize = 20;
         }
-        float value_at_point = meta->signal.data[(int)(i * w_ratio)];
-        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", time_seconds + (i*w_ratio*meta->w_scale)/meta->signal.sample_rate, value_at_point, i, (int)h_offset - my - 1);
+
+        float value_at_point = meta->func((time_seconds - fmodf(time_seconds, meta->seconds_per_plot)) + i*seconds_per_pixel);
+        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", (time_seconds - fmodf(time_seconds, meta->seconds_per_plot)) + i*seconds_per_pixel, value_at_point, i, (int)h_offset - my - 1);
         int len = MeasureText(t, fontsize);
 
         int ypos = my - fontsize;
         if (ypos < bounds.y + 1) ypos = bounds.y + 1;
-        DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
+        if (xpos <= end)
+            DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
         
         xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
         DrawText(t, xpos, ypos, fontsize, GRAY);
     }
 
     Vector2 pv = {0};
-    Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->signal.data[0] + meta->h_shift), bounds.y, h_offset) };
-    for (int i = 1; i < bounds.width; ++i) {
-        int x = (int)(i * w_ratio);
-        float y = meta->signal.data[x] + meta->h_shift;
+    Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->func(0.0f) + meta->h_shift), bounds.y, h_offset) };
+
+    for (int i = 1; i < end; ++i) {
+        float y =  meta->func((time_seconds - fmodf(time_seconds, meta->seconds_per_plot)) + i*seconds_per_pixel) + meta->h_shift;
         pv = v;
         v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
         DrawLineEx(pv, v, 2, color);
     }
-}
-
-void pm_apply(struct Plot_Metadata *pm) {
-    float x = time_seconds;
-    for (int i = 0; i < pm->signal.capacity; ++i) {
-        x += 1.0f / pm->signal.sample_rate;
-        pm->signal.data[i] = pm->func(x * pm->w_scale);
-    }
+    /* DrawLine(end, bounds.y, end, h_offset, GREEN); */
 }
 
 int main(int argc, char *argv[]) {
@@ -538,7 +533,7 @@ int main(int argc, char *argv[]) {
     InitWindow(screenWidth, screenHeight, "subsynth");
     InitAudioDevice();
     SetAudioStreamBufferSizeDefault(MAX_SAMPLES_PER_UPDATE);
-    AudioStream stream = LoadAudioStream(44100, 16, 1);
+    AudioStream stream = LoadAudioStream(sample_rate, 16, 1);
     SetAudioStreamCallback(stream, AudioInputCallback);
     SetAudioStreamVolume(stream, volume);
     
@@ -547,126 +542,110 @@ int main(int argc, char *argv[]) {
     int cur_fps = h_fps;
     SetTargetFPS(cur_fps);
 
-    float *buffer = (float*)calloc((int)(screenWidth*MAX_PLOTS), sizeof(float));
-    Signal plot[MAX_PLOTS];
-    for (int i = 0; i < MAX_PLOTS; ++i) {
-        plot[i] = (Signal) {
-            .data = buffer + screenWidth * i,
-            .sample_rate = sample_rate,
-            .size = screenWidth,
-            .capacity = screenWidth,
-        };
-    }
+    /* float *buffer = (float*)calloc((int)(screenWidth*MAX_PLOTS), sizeof(float)); */
+    /* Signal plot[MAX_PLOTS]; */
+    /* for (int i = 0; i < MAX_PLOTS; ++i) { */
+    /*     plot[i] = (Signal) { */
+    /*         .data = buffer + screenWidth * i, */
+    /*         .sample_rate = 44100, */
+    /*         .size = screenWidth, */
+    /*         .capacity = screenWidth, */
+    /*     }; */
+    /* } */
 
     struct Plots plot_meta = {
         .volume_envelope = {
             .name = "Volume Envelope",
             .func = volume_envelope,
-            .signal = plot[PLOT_ONE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 100.0f,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
-            .signal = plot[PLOT_TWO],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 100.0f,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
             .func = pitch_lfo,
-            .signal = plot[PLOT_THREE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 100.0f,
             .h_shift = 2.0f,
         },
         .volume_lfo =  {
             .name = "Volume LFO",
             .func = volume_lfo,
             .h_scale = 1.0f,
-            .signal = plot[PLOT_FOUR],
-            .w_scale = 100.0f,
+            .seconds_per_plot = 0.1f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .oscillator_a =  {
             .name = "Oscillator A",
             .func = oscillator_a,
-            .signal = plot[PLOT_ONE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .oscillator_b =  {
             .name = "Oscillator B",
             .func = oscillator_b,
-            .signal = plot[PLOT_TWO],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .filter = {
             .name = "Filter",
             .func = identity,
-            .signal = plot[PLOT_ONE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .saturation = {
             .name = "Saturation",
             .func = identity,
-            .signal = plot[PLOT_TWO],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .reverb = {
             .name = "Reverb",
             .func = identity,
-            .signal = plot[PLOT_THREE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .adjust = {
             .name = "Adjust",
             .func = identity,
-            .signal = plot[PLOT_FOUR],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .mixed = {
             .name = "Mixed",
             .func = chain,
-            .signal = plot[PLOT_FIVE],
+            .seconds_per_plot = 0.1f,
             .h_scale = 1.0f,
-            .w_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
         }
     };
 
     enum Page page = MIXED;
-    enum Page prevPage = page;
-    bool redraw = true;
     bool playing = false;
 
     frequency = midi_to_hz(floorf(midi_f0));
 
     while (!WindowShouldClose()) {
         /* Update */
-        if (prevPage != page || IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
-            redraw = true;
-        }
 
         if (IsWindowFocused()) {
             if (cur_fps != h_fps) {
@@ -674,7 +653,6 @@ int main(int argc, char *argv[]) {
                 SetTargetFPS(cur_fps);
             }
         } else {
-            redraw = false;
             if (cur_fps != l_fps) {
                 cur_fps = l_fps;
                 SetTargetFPS(cur_fps);
@@ -695,50 +673,9 @@ int main(int argc, char *argv[]) {
             }
         }
 
-        if (playing) {
-            redraw = true;
-        }
-        
         if (time_seconds == length_seconds) {
             PauseAudioStream(stream);
             playing = false;
-        }
-
-        switch (page) {
-        case ENVELOPE: {
-            if (redraw) {
-                pm_apply(&plot_meta.volume_envelope);
-                pm_apply(&plot_meta.modulation_envelope);
-                pm_apply(&plot_meta.pitch_lfo);
-                pm_apply(&plot_meta.volume_lfo);
-                pm_apply(&plot_meta.mixed);
-                redraw = false;
-            }
-        } break;
-        case OSCILLATOR: {
-            if (redraw) {
-                pm_apply(&plot_meta.oscillator_a);
-                pm_apply(&plot_meta.oscillator_b);
-                pm_apply(&plot_meta.mixed);
-                redraw = false;
-            }
-        } break;
-        case FILTER: {
-            if (redraw) {
-                pm_apply(&plot_meta.filter);
-                pm_apply(&plot_meta.reverb);
-                pm_apply(&plot_meta.saturation);
-                pm_apply(&plot_meta.adjust);
-                pm_apply(&plot_meta.mixed);
-                redraw = false;
-            }
-        } break;
-        case MIXED: {
-            if (redraw) {
-                pm_apply(&plot_meta.mixed);
-                redraw = false;
-            }
-        } break;
         }
 
         /* Draw */
@@ -749,7 +686,6 @@ int main(int argc, char *argv[]) {
         Rectangle top = {.width = 100, .height = 20, .x = 30, .y = 2};
         Rectangle r = top;
 
-        prevPage = page;
         GuiToggleGroup(r, "Envelope;Oscillator;Filter;Mixed", (int *)&page);
         
         top.width = 200;
