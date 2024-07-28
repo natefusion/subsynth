@@ -432,7 +432,7 @@ float oscillator_b(float x) {
 
 float chain(float x) {
     float a = (1.0f - params.osc_mix) * oscillator_a(x) + params.osc_mix * oscillator_b(x);
-    return (volume_lfo(x) + 1.0f) * a;
+    return clampf((volume_lfo(x)/2.0f + 0.5f) * a, -1.0f, 1.0f);
 }
 
 void AudioInputCallback(void *buffer, unsigned int frames) {
@@ -506,7 +506,7 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
 
         int ypos = my - fontsize;
         if (ypos < bounds.y + 1) ypos = bounds.y + 1;
-        if (xpos <= end)
+        if (i <= end)
             DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
         
         xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
@@ -647,6 +647,10 @@ int main(int argc, char *argv[]) {
     while (!WindowShouldClose()) {
         /* Update */
 
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            SetAudioStreamVolume(stream, volume);
+        }
+
         if (IsWindowFocused()) {
             if (cur_fps != h_fps) {
                 cur_fps = h_fps;
@@ -688,7 +692,7 @@ int main(int argc, char *argv[]) {
 
         GuiToggleGroup(r, "Envelope;Oscillator;Filter;Mixed", (int *)&page);
         
-        top.width = 200;
+        top.width = 100;
         top.x = (2 + r.width)*4 + r.x + 30;
         
         GuiSlider(top, TextFormat("%.0f", midi_f0), "Frequency", &midi_f0, 0.0f, 127.0f);
@@ -697,6 +701,10 @@ int main(int argc, char *argv[]) {
         top.x += top.width + 90;
         top.width = 125;
         GuiSliderBar(top, "Time", TextFormat("%.1fs", time_seconds), &time_seconds, 0.0f, length_seconds);
+
+        top.x += top.width + 50;
+        top.width = 75;
+        GuiSliderBar(top, "Vol", TextFormat("%.1f", volume), &volume, 0.0f, 1.0f);
 
         if (GuiLabelButton((Rectangle) { .x = screenWidth - 65, .y = top.y + 5, .height = 10 }, playing ? "Playing" : "Not Playing")) {
             playing = !playing;
