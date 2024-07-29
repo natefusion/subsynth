@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <math.h>           // Required for: sinf()
+#include <stdlib.h>
 
 #include "raylib.h"
 #define RAYGUI_IMPLEMENTATION
@@ -15,11 +16,13 @@
 float midi_f0 = 60.0f;
 float frequency = 8.0f;
 float sample_rate = 44100.0f;
-float length_seconds = 4.0f;
+float length_seconds = 16.0f;
 float time_seconds = 0.0f;
 float volume = 0.2f;
 int screenWidth = 1000;
 int screenHeight = 1000;
+int sample_size = 16;
+int channels = 1;
 
 enum Envelope_Parameters {
     ENV_TIME,
@@ -89,6 +92,7 @@ enum Page {
   OSCILLATOR,
   FILTER,
   MIXED,
+  OPTIONS,
 };
 
 #define PARAMS_LEN ENVELOPE_LEN + OSCILLATOR_LEN + FILTER_LEN
@@ -379,7 +383,7 @@ float modulation_envelope(float x) {
 
 float pitch_lfo(float x) {
     float amplitude =
-        powf(2.0f * (params.lfo_amt - 0.5f), 2.0f)
+        4.0f * powf((params.lfo_amt - 0.5f), 2.0f)
         * tanhf(fabsf(x) / (5.0f * params.lfo_dly))
         * (params.lfo_bal < 0.5f ? 1.0f : -2.0f * params.lfo_bal + 2.0f);
     
@@ -390,28 +394,29 @@ float pitch_lfo(float x) {
 }
 
 float volume_lfo(float x) {
+    x /= 2.0f;
     float amplitude =
         1.2f * powf(2.0f * (params.lfo_amt - 0.5f), 2.0f)
         * tanhf(fabsf(x) / (5.0f * params.lfo_dly))
         * (params.lfo_bal > 0.5f ? 1.0f : 2.0f * params.lfo_bal);
     
-    x = x * (1.0f + params.lfo_rate);
+    x *= powf((1.0f + 4.0f*params.lfo_rate), 2.0f);
     float triangle = 4.0f * fabsf(x - floorf(x + 0.5f)) - 1.0f;
 
-    return clampf(amplitude * triangle, -1.0f, 1.0f);
+    return clampf(amplitude * triangle + 0.5f, 0.0f, 1.0f);
 }
 
 float oscillator(float x, float form) {
     float partials = 12000.0f / (frequency * log10f(frequency));
     if (form >= 0 && form <= 0.57) {
-        float sinx = sinf(TAU * frequency * x);
-        float sawx = tanhf(PI * partials * sinf(TAU * frequency * x)) * (1.0f + cosf(TAU * frequency * x)) / 2.0f;
+        float sinx = sinf(TAU * x);
+        float sawx = tanhf(PI * partials * sinf(TAU * x)) * (1.0f + cosf(TAU * x)) / 2.0f;
         float i = map(form, 0.0f, 0.57f, 0.0f, 1.0f);
         return (1 - i) * sinx + i * sawx;
     } else /* if (form > 0.57 && form <= 0.81) */ {
         float shape = 1.0f - map(form, 0.57f, 1.0f/* 0.81f */, 0.0f, 1.0f);
-        float square = tanh(PI * partials * sinf(TAU * frequency * x) / 2.0f);
-        return (1.0f - shape / 2.0f) * square * (1.0f + shape * cosf(TAU * frequency * x));
+        float square = tanh(PI * partials * sinf(TAU * x) / 2.0f);
+        return (1.0f - shape / 2.0f) * square * (1.0f + shape * cosf(TAU * x));
     }
     /* else { */
     /*     float duty = map(form, 0.81f, 1.0f, 0.0f, 1.0f); */
@@ -423,27 +428,32 @@ float oscillator(float x, float form) {
 }
 
 float oscillator_a(float x) {
-    return oscillator(x, params.a_form);
+    return oscillator(x * frequency, params.a_form);
 }
 
 float oscillator_b(float x) {
-    return oscillator(x, params.b_form);
+    return oscillator(x * frequency, params.b_form);
 }
 
 float chain(float x) {
-    float a = (1.0f - params.osc_mix) * oscillator_a(x) + params.osc_mix * oscillator_b(x);
-    return clampf((volume_lfo(x)/2.0f + 0.5f) * a, -1.0f, 1.0f);
+    float pitch = frequency + 50.0f * pitch_lfo(x);
+    float a = (1.0f - params.osc_mix) * oscillator(x * pitch, params.a_form) + params.osc_mix * oscillator(x * pitch, params.b_form);
+    return volume_lfo(x) * a;
 }
 
 void AudioInputCallback(void *buffer, unsigned int frames) {
     short *d = (short *)buffer;
-
     for (unsigned int i = 0; i < frames; ++i) {
         d[i] = (short)(chain(time_seconds) * 32000.0f);
         time_seconds += 1.0f / sample_rate;
-        if (time_seconds > length_seconds) time_seconds = 0.18f;
+        if (time_seconds > length_seconds) time_seconds = 0.0f;
     }
 }
+
+struct Options {
+    bool export_wav;
+    bool export_params;
+};
 
 enum Plot_Data {
     PLOT_ONE,
@@ -533,7 +543,7 @@ int main(int argc, char *argv[]) {
     InitWindow(screenWidth, screenHeight, "subsynth");
     InitAudioDevice();
     SetAudioStreamBufferSizeDefault(MAX_SAMPLES_PER_UPDATE);
-    AudioStream stream = LoadAudioStream(sample_rate, 16, 1);
+    AudioStream stream = LoadAudioStream(sample_rate, sample_size, channels);
     SetAudioStreamCallback(stream, AudioInputCallback);
     SetAudioStreamVolume(stream, volume);
     
@@ -541,6 +551,11 @@ int main(int argc, char *argv[]) {
     int l_fps = h_fps / 6;
     int cur_fps = h_fps;
     SetTargetFPS(cur_fps);
+
+    struct Options options = {
+        .export_wav = false,
+        .export_params = true,
+    };
 
     /* float *buffer = (float*)calloc((int)(screenWidth*MAX_PLOTS), sizeof(float)); */
     /* Signal plot[MAX_PLOTS]; */
@@ -557,34 +572,34 @@ int main(int argc, char *argv[]) {
         .volume_envelope = {
             .name = "Volume Envelope",
             .func = volume_envelope,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
             .func = pitch_lfo,
-            .seconds_per_plot = 0.1f,
-            .h_scale = 1.0f,
+            .seconds_per_plot = length_seconds,
+            .h_scale = 0.01f,
             .h_shift = 2.0f,
         },
         .volume_lfo =  {
             .name = "Volume LFO",
             .func = volume_lfo,
             .h_scale = 1.0f,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_shift = 2.0f,
             .w_shift = 0,
         },
         .oscillator_a =  {
             .name = "Oscillator A",
             .func = oscillator_a,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -592,7 +607,7 @@ int main(int argc, char *argv[]) {
         .oscillator_b =  {
             .name = "Oscillator B",
             .func = oscillator_b,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -600,7 +615,7 @@ int main(int argc, char *argv[]) {
         .filter = {
             .name = "Filter",
             .func = identity,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -608,7 +623,7 @@ int main(int argc, char *argv[]) {
         .saturation = {
             .name = "Saturation",
             .func = identity,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -616,7 +631,7 @@ int main(int argc, char *argv[]) {
         .reverb = {
             .name = "Reverb",
             .func = identity,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -624,7 +639,7 @@ int main(int argc, char *argv[]) {
         .adjust = {
             .name = "Adjust",
             .func = identity,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -632,7 +647,7 @@ int main(int argc, char *argv[]) {
         .mixed = {
             .name = "Mixed",
             .func = chain,
-            .seconds_per_plot = 0.1f,
+            .seconds_per_plot = length_seconds,
             .h_scale = 1.0f,
             .h_shift = 2.0f,
             .w_shift = 0,
@@ -691,7 +706,11 @@ int main(int argc, char *argv[]) {
         Rectangle r = top;
 
         GuiToggleGroup(r, "Envelope;Oscillator;Filter;Mixed", (int *)&page);
-        
+
+        if (GuiButton((Rectangle){.width=26, .height = 20, .x = 2, .y = 2 }, "O")) {
+            page = OPTIONS;
+        }
+
         top.width = 100;
         top.x = (2 + r.width)*4 + r.x + 30;
         
@@ -714,8 +733,6 @@ int main(int argc, char *argv[]) {
                 PauseAudioStream(stream);
             }
         }
-
-        /* DrawText(playing ? "Playing" : "Not Playing", screenWidth - 65, top.y + 5, 10, GRAY); */
 
         switch (page) {
         case ENVELOPE: {
@@ -795,10 +812,41 @@ int main(int argc, char *argv[]) {
 
             DrawPlot(r, &plot_meta.mixed, RED);
         } break;
+        case OPTIONS: {
+            Rectangle r = {.x = 2, .y = 24, .width = 20, .height = 20};
+            GuiDrawText("Options", (Rectangle) {.x = r.x, .y=r.y, .width=200, .height=20}, 0, GRAY);
+
+            r.y += r.height + 2;
+            GuiCheckBox(r, "Export wave?", &options.export_wav);
+
+            r.y += r.height + 2;
+            GuiCheckBox(r, "Export params?", &options.export_params);
+        } break;
         }
 
         EndDrawing();
     }
 
     write_params(filepath);
+
+    if (options.export_wav) {
+        short *data = malloc((int)sample_rate*length_seconds*sizeof(short));
+        float x = 0.0f;
+        for (int i = 0; i < (int)(length_seconds*sample_rate); ++i) {
+            data[i] = (short)(chain(x)*32000.0f);
+            x += 1.0f / sample_rate;
+        }
+
+        Wave wave = {
+            .sampleRate = (unsigned int)sample_rate,
+            .sampleSize = (unsigned int)sample_size,
+            .channels = (unsigned int)channels,
+            .data = (void *)data,
+            .frameCount = length_seconds*sample_rate,
+        };
+
+        if (ExportWave(wave, "out.wav")) {
+            printf("Exported wav successfully\n");
+        }
+    }
 }
