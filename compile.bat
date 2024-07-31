@@ -30,7 +30,7 @@ IF NOT EXIST !RAYLIB_OBJ!\ (
 
 cd "!ROOT_DIR!\target\debug"
 
-cl.exe /nologo /std:c11 /Od /Zi /utf-8 /validate-charset /EHsc /Fe"!GAME_NAME!" /I"!raylib!" /I"!raygui!" "!SOURCE!" /link kernel32.lib user32.lib shell32.lib winmm.lib gdi32.lib opengl32.lib "!RAYLIB_OBJ!\*.obj"
+cl.exe /nologo /std:c11 /Od /Zi /utf-8 /validate-charset /EHsc /Fe"!GAME_NAME!" /I"!raylib!" /I"!raygui!" "!SOURCE!" /link kernel32.lib user32.lib shell32.lib winmm.lib gdi32.lib opengl32.lib "!RAYLIB_OBJ!\*.obj" || exit /B
 
 del *.obj
 
