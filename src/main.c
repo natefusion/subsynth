@@ -1,3 +1,4 @@
+#include <float.h>
 #include <stdio.h>
 #include <math.h>           // Required for: sinf()
 #include <stdlib.h>
@@ -11,12 +12,13 @@
 
 #define TO_STR(x) #x
 
-#define TAU (2*PI)
+#define TAU (2.0f*PI)
 
 float midi_f0 = 60.0f;
 float frequency = 8.0f;
+float audioFrequency = 60.0f;
 float sample_rate = 44100.0f;
-float length_seconds = 4.0f;
+float length_seconds = 16.0f;
 float time_seconds = 0.0f;
 float chain_idx = 0.0f;
 float volume = 0.2f;
@@ -241,21 +243,10 @@ void write_params(const char* filepath) {
     FILE *fp = fopen(filepath, "w");
     if (fp) {
         fputc('{', fp);
-        
-        for (int i = 0; i < ENVELOPE_LEN; ++i) {
-            fprintf(fp, ".%s = %.2f,", envelope_tostr(i), params.env[i]);
-        }
-
-        for (int i = 0; i < OSCILLATOR_LEN; ++i) {
-            fprintf(fp, ".%s = %.2f,", oscillator_tostr(i), params.osc[i]);
-        }
-
-        for (int i = 0; i < FILTER_LEN; ++i) {
-            fprintf(fp, ".%s = %.2f,", filter_tostr(i), params.fil[i]);
-        }
-
+        for (int i = 0; i < ENVELOPE_LEN; ++i)   fprintf(fp, ".%s = %.2f,", envelope_tostr(i), params.env[i]);
+        for (int i = 0; i < OSCILLATOR_LEN; ++i) fprintf(fp, ".%s = %.2f,", oscillator_tostr(i), params.osc[i]);
+        for (int i = 0; i < FILTER_LEN; ++i)     fprintf(fp, ".%s = %.2f,", filter_tostr(i), params.fil[i]);
         fprintf(fp, "}\n");
-        
         fclose(fp);
     } else {
         fprintf(stderr, "Could not open: %s\n", filepath);
@@ -263,41 +254,40 @@ void write_params(const char* filepath) {
 }
 
 void read_params(const char *filepath) {
-    int idx = 0;
-    FILE *fp = fopen(filepath, "r");
     printf("%s", "Reading params ... ");
-    if (fp) {
-        char c = fgetc(fp);
-        if (c != '{') {
-            printf("%s", "The file is wrong!\n");
-        } else {
-            while ((c = fgetc(fp)) != EOF) {
-                if (c == '.') {
-                    continue;
-                } else if (c == '=') {
-                    c = fgetc(fp); // consume space
+    
+    FILE *fp = fopen(filepath, "r");
+    if (!fp) {
+        printf("Can't read file\n");
+        return;
+    }
 
-                    float n;
-                    int result = fscanf(fp, "%f", &n);
-                    if (result == EOF) {
-                        printf("Bad number\n");
-                        break;
-                    }
-                    params.p[idx] = n; 
-                    idx += 1;
-
-                    c = fgetc(fp); // consume comma
-                } else if (c == '}') {
-                    printf("%s", "All Done!\n");
+    if ('{' == fgetc(fp)) {
+        int idx = 0;
+        while (true) {
+            char c = fgetc(fp);
+            if ('}' == c || EOF == c) { printf("%s", "All Done!\n"); break; }
+            if ('.' == c) { continue; }
+            if ('=' == c) {
+                fgetc(fp); // consume space
+                
+                float n;
+                int result = fscanf(fp, "%f", &n);
+                if (result == EOF) {
+                    printf("Bad number\n");
                     break;
                 }
+                params.p[idx] = n; 
+                idx += 1;
+                
+                fgetc(fp); // consume comma
             }
         }
-
-        fclose(fp);
     } else {
-        printf("Can't read file\n");
+        printf("%s", "The file is wrong!\n");
     }
+
+    fclose(fp);
 }
 
 float clampf(float x, float min, float max) {
@@ -308,72 +298,15 @@ float clampf(float x, float min, float max) {
 
 float identity(float x) { return x; }
 float map(float x, float in_min, float in_max, float out_min, float out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
-
-float midi_to_hz(float midi) {
-    return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f;
-}
+float midi_to_hz(float midi) { return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f; }
 
 typedef struct {
     float *data;
     unsigned int size;
 } Signal;
 
-Signal scratch = {0};
-
-void s_cumsum(Signal s, float x)             { s.data[0] = x; for (unsigned int i = 1; i < s.size; ++i) s.data[i] = s.data[i-1] + x; }
-void s_pow(Signal s, float exponent)         { for (unsigned int i = 0; i < s.size; ++i) s.data[i] = powf(s.data[i], exponent); }
-void s_clamp(Signal s, float min, float max) { for (unsigned int i = 0; i < s.size; ++i) s.data[i] = clampf(s.data[i], min, max); }
-void s_call(float (*f)(float), Signal s)    { for (unsigned int i = 0; i < s.size; ++i) s.data[i] = f(s.data[i]); };
-
-void ss_copy(Signal write_to, Signal read_from) { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] = read_from.data[i]; }
-void sf_copy(Signal write_to, float read_from)  { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] = read_from; }
-void ss_mul(Signal write_to, Signal read_from)  { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] *= read_from.data[i]; }
-void ss_add(Signal write_to, Signal read_from)  { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] += read_from.data[i]; }
-void ss_sub(Signal write_to, Signal read_from)  { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] -= read_from.data[i]; }
-void ss_div(Signal write_to, Signal read_from)  { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] /= read_from.data[i]; }
-
-void sf_mul(Signal write_to, float read_from) { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] *= read_from; }
-void sf_add(Signal write_to, float read_from) { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] += read_from; }
-void sf_sub(Signal write_to, float read_from) { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] -= read_from; }
-void sf_div(Signal write_to, float read_from) { for (unsigned int i = 0; i < write_to.size; ++i) write_to.data[i] /= read_from; }
-
-
-
-/* void make_vco_argument(float midi_f0, Signal *s) { */
-/*     if (s->size == 0) { */
-/*         s->data[0] = midi_to_hz(midi_f0); */
-/*         s->size = s->capacity; */
-/*         float prev = 0; */
-/*         for (int i = 1; i < s->size; ++i) { */
-/*             float cur = prev + TAU * s->data[0] / s->sample_rate; */
-/*             s->data[i] = cur; */
-/*             prev = cur; */
-/*         } */
-/*     } else { */
-/*         int mod_depth = 0; // me no understand purpose */
-/*         float prev = 0; */
-/*         for (int i = 0; i < s->size; ++i) { */
-/*             float cur = prev + TAU * midi_to_hz(clampf(midi_f0 + mod_depth*s->data[i], 0.0f, 127.0f)) / s->sample_rate; */
-/*             s->data[i] = cur; */
-/*             prev = cur; */
-/*         } */
-/*     } */
-/* } */
-
-/* void square_saw(float midi_f0, Signal *argument) { */
-/*     make_vco_argument(midi_f0, argument); */
-    
-/*     // mod_depth is used here too in torchsynth */
-/*     float max_f0 = midi_to_hz(midi_f0); */
-/*     float partials = 12000 / (max_f0 * log10f(max_f0)); */
-    
-/*     for (int i = 0; i < argument->size; ++i) { */
-/*         float square = tanhf(PI * partials * sinf(argument->data[i]) / 2.0f); */
-/*         argument->data[i] = (screenHeight/2.0f)*(1 - params.a_form / 2.0f) * square * (1.0f + params.a_form * cosf(argument->data[i])); */
-/*     } */
-/* } */
-
 float volume_envelope(float x) {
+    x /= 4.0f;
     float vol_fade = 1.0f;
     if (params.vol_fade >= 0.75f) vol_fade = (4.0f * params.vol_fade - 3) * -x + 1.0f;
 
@@ -403,10 +336,14 @@ float volume_envelope(float x) {
 }
 
 float modulation_envelope(float x) {
+    x /= 4.0f;
     float a = x / sqrtf(params.env_loop);
-    x = (a - floor(a)) / params.env_time;
+    float x_periodic = (a - floor(a)) / params.env_time;
+    x /= params.env_time;
     
     float env_tilt = powf(params.env_tilt, 4.0f);
+
+    if (params.env_loop <= params.env_time) x = x_periodic;
 
     float result = 0.0f;
     if (x >= 0 && x <= env_tilt) {
@@ -419,16 +356,15 @@ float modulation_envelope(float x) {
 }
 
 float pitch_lfo(float x) {
-    x /= 2.0f;
-    x *= powf((1.0f + 4.0f*params.lfo_rate), 2.0f);    
+    x /= 4.0f;
+
     float amplitude =
         4.0f * powf((params.lfo_amt - 0.5f), 2.0f)
-        * tanhf(fabsf(x) / (5.0f * params.lfo_dly))
+        * tanhf(fabsf(x) / (5.0f * params.lfo_dly + FLT_EPSILON))
         * (params.lfo_bal < 0.5f ? 1.0f : -2.0f * params.lfo_bal + 2.0f);
 
+    float wave = sinf(TAU * x * powf(1.0f + 4.0f*params.lfo_rate, 2.0f));
 
-    float wave = sinf(TAU * x - PI / 2.0f);
-    
     return amplitude * wave;
 }
 
@@ -449,18 +385,7 @@ float volume_lfo(float x) {
     return clampf(amplitude * triangle + shift1 + shift2, 0.0f, 1.0f);
 }
 
-void pitch_lfo_batch(Signal x) {
-    s_cumsum(x, 1.0f/sample_rate);
-    s_call(pitch_lfo, x);
-}
-
-void volume_lfo_batch(Signal x) {
-    s_cumsum(x, 1.0f/sample_rate);
-    s_call(volume_lfo, x);
-}
-
-float oscillator(float x, float frequency, float form) {
-    x *= frequency;
+float oscillator(float x, float form) {
     float partials = 12000.0f / (frequency * log10f(frequency));
     if (form >= 0 && form <= 0.57) {
         float sinx = sinf(TAU * x);
@@ -483,46 +408,44 @@ float oscillator(float x, float frequency, float form) {
     /* } */
 }
 
-float oscillator_a(float x) {
-    return oscillator(x, frequency, params.a_form);
-}
-
-float oscillator_b(float x) {
-    return oscillator(x, frequency, params.b_form);
-}
-
-float osc_a(float x) { return oscillator(x, frequency, params.a_form); }
-float osc_b(float x) { return oscillator(x, frequency, params.b_form); }
-
-void oscillator_a_batch(Signal x) {
-    s_cumsum(x, 1.0f/sample_rate);
-    s_call(osc_a, x);
-}
-
-void oscillator_b_batch(Signal x) {
-    s_cumsum(x, 1.0f/sample_rate);
-    s_call(osc_b, x);
-}
+float oscillator_a(float x) { return oscillator(x, params.a_form); }
+float oscillator_b(float x) { return oscillator(x, params.b_form); }
 
 float chain(float x) {
-    float pitch = frequency + 10.0f * (pitch_lfo(x) + 2.0f * (params.a_mod - 0.5f) * modulation_envelope(x));
-    float a = (1.0f - params.osc_mix) * oscillator(x, pitch, params.a_form) + params.osc_mix * oscillator(x, pitch, params.b_form);
-    return volume_envelope(x) * volume_lfo(x) * a;
-}
+    float mod_depth = 50.0f;
+    float mod_env = modulation_envelope(x);
+    float a_freq = params.a_freq < 0.5 ? params.a_freq + 0.5f : 2.0f * params.a_freq;
+    float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
-void chain_batch(Signal x) {
-    s_cumsum(x, 1.0f/sample_rate);
-    s_call(chain, x);
+    // 2.0f goes with a_mod/b_mod => 2a_mod - 1 or 2b_mod - 1
+    float mod_partial = 2.0f * mod_depth * mod_env * fmodf(x, 4.0f); // I divide x by four in modulation_envelope, and it's original range was zero to one
+    float mod_env_a = mod_partial * (params.a_mod - 0.5f);
+    float mod_env_b = mod_partial * (params.b_mod - 0.5f);
+    float pitch_partial = frequency * x;
+    float pitch_a = a_freq * pitch_partial + mod_env_a;
+    float pitch_b = b_freq * pitch_partial + mod_env_b;
+    float sub_pitch = (frequency * b_freq / 2.0f) * x + mod_env_b;
+    float sub_am = clampf((params.sub_am - 0.35) / 0.65f, 0.0f, 1.0f);
+    
+    float a = oscillator_a(pitch_a);
+    float b = (oscillator_b(pitch_b) + sub_am * sinf(TAU * sub_pitch)) / map(sub_am, 0.0f, 1.0f, 1.0f, 2.0f);
+
+    /* float mix_mod_amt = (2.0f * params.mix_mod - 1.0f) * mod_env; */
+    float osc_mix = cbrtf(params.osc_mix);
+    
+    float waveform = (1.0f - osc_mix) * a + osc_mix * b;
+
+    float volume = volume_envelope(x) * volume_lfo(x);
+    
+    return volume * waveform;
 }
 
 void AudioInputCallback(void *buffer, unsigned int frames) {
     short *d = (short *)buffer;
     for (unsigned int i = 0; i < frames; ++i) {
         d[i] = (short)(chain(time_seconds) * 32000.0f);
-        chain_idx += 1.0f / sample_rate;
-        time_seconds += 1.0f / sample_rate;
+        time_seconds += 1.0f/sample_rate;
         if (time_seconds > length_seconds) time_seconds -= length_seconds;
-        if (chain_idx > 1.0f) chain_idx -= 1.0f;
     }
 }
 
@@ -534,7 +457,6 @@ struct Options {
 struct Plot_Metadata {
     char *name;
     float (*func)(float);
-    Signal signal;
     float seconds_per_plot;
     float h_shift;
 };
@@ -558,7 +480,7 @@ union Plots {
     };
 };
 
-void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
+void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta) {
     GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
     DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
     GuiSliderBar((Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height - 13, .width = 100, .height = 10 },
@@ -597,13 +519,53 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta, Color color) {
     Vector2 pv = {0};
     Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->func(start) + meta->h_shift), bounds.y, h_offset) };
 
-    for (int i = 1; i < end; ++i) {
+    for (int i = 1; i < bounds.width; ++i) {
         float y =  meta->func(start + i*seconds_per_pixel) + meta->h_shift;
         pv = v;
         v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
-        DrawLineEx(pv, v, 2, color);
+
+        DrawLineEx(pv, v, 2, i < end ? RED : (Color) { .r = RED.r, .g = RED.g, .b = RED.g, .a = 32 });
     }
-    /* DrawLine(end, bounds.y, end, h_offset, GREEN); */
+}
+
+void DrawPlotSimple(Rectangle bounds, struct Plot_Metadata *meta) {
+    GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
+    DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
+    
+    float h_offset = bounds.y + bounds.height;
+    float h_ratio = bounds.height / 4.0f;
+
+    Vector2 mp = GetMousePosition();
+    int mx = (int)mp.x;
+    int my = (int)mp.y;
+    if (CheckCollisionPointRec(mp, bounds)) {
+        int xpos = mx + 1;
+        int i = mx - (int)bounds.x;
+        int fontsize = 10;
+        if (IsKeyDown(KEY_LEFT_SHIFT)) {
+            fontsize = 20;
+        }
+
+        float value_at_point = meta->func(i/bounds.width*2.0f);
+        const char *t = TextFormat("(%.3f) (%d, %d)", value_at_point, i, (int)h_offset - my - 1);
+        int len = MeasureText(t, fontsize);
+
+        int ypos = my - fontsize;
+        if (ypos < bounds.y + 1) ypos = bounds.y + 1;
+        DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
+        
+        xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
+        DrawText(t, xpos, ypos, fontsize, GRAY);
+    }
+    
+    Vector2 pv = {0};
+    Vector2 v = {.x = bounds.x, .y = clampf(h_offset - h_ratio*(meta->func(0) + meta->h_shift), bounds.y, h_offset) };
+    for (int i = 0; i < bounds.width; ++i) {
+        float y = meta->func((float)i/bounds.width*2.0f) + meta->h_shift;
+        pv = v;
+        v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
+        DrawLineEx(pv, v, 2, RED);
+    }
 }
 
 int main(int argc, char *argv[]) {
@@ -628,23 +590,16 @@ int main(int argc, char *argv[]) {
         .export_params = true,
     };
 
-    const int buf_len = length_seconds * sample_rate;
-    float *buffer = (float*)calloc((int)(buf_len*NUM_PLOTS), sizeof(float));
-    float *scratch_buffer = (float*)calloc(buf_len, sizeof(float));
-    
-    scratch = (Signal) {
-        .data = scratch_buffer,
-        .size = buf_len,
-    };
-    
     union Plots plot_meta = {
         .volume_envelope = {
             .name = "Volume Envelope",
             .func = volume_envelope,
+            .seconds_per_plot = length_seconds,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
+            .seconds_per_plot = length_seconds,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
@@ -654,56 +609,56 @@ int main(int argc, char *argv[]) {
         .volume_lfo =  {
             .name = "Volume LFO",
             .func = volume_lfo,
+            .seconds_per_plot = length_seconds,
         },
         .oscillator_a =  {
             .name = "Oscillator A",
             .func = oscillator_a,
+            .seconds_per_plot = 1 / frequency,
         },
         .oscillator_b =  {
             .name = "Oscillator B",
             .func = oscillator_b,
+            .seconds_per_plot = 1 / frequency,
         },
         .filter = {
             .name = "Filter",
             .func = identity,
+            .seconds_per_plot = length_seconds,
         },
         .saturation = {
             .name = "Saturation",
             .func = identity,
+            .seconds_per_plot = length_seconds,
         },
         .reverb = {
             .name = "Reverb",
             .func = identity,
+            .seconds_per_plot = length_seconds,
         },
         .adjust = {
             .name = "Adjust",
             .func = identity,
+            .seconds_per_plot = length_seconds,
         },
         .mixed = {
             .name = "Mixed",
             .func = chain,
+            .seconds_per_plot = length_seconds,
         }
     };
 
     for (int i = 0; i < NUM_PLOTS; ++i) {
-        plot_meta.plots[i].signal = (Signal){
-            .data = buffer + buf_len * i,
-            .size = buf_len,
-        };
-
-        plot_meta.plots[i].seconds_per_plot = length_seconds;
         plot_meta.plots[i].h_shift = 2.0f;
     }
 
     enum Page page = MIXED;
     bool playing = false;
-    bool resample = false;
-   
 
     frequency = midi_to_hz(floorf(midi_f0));
 
     while (!WindowShouldClose()) {
-        /* Update */
+        /* Begin Update */
         
         if (IsFileDropped()) {
             FilePathList dropped_files = LoadDroppedFiles();
@@ -718,6 +673,15 @@ int main(int argc, char *argv[]) {
         if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
             SetAudioStreamVolume(stream, volume);
         }
+
+        if (IsKeyPressed(KEY_RIGHT)) {
+            if (midi_f0 < 127)
+                midi_f0 += 1;
+        } else if (IsKeyPressed(KEY_LEFT)) {
+            if (midi_f0 > 0)
+                midi_f0 -= 1;
+        }
+        
 
         if (IsWindowFocused()) {
             if (cur_fps != h_fps) {
@@ -750,17 +714,8 @@ int main(int argc, char *argv[]) {
             playing = false;
         }
 
-        /* if (resample) { */
-        /*     resample = false; */
-        /*     for (int i = 0; i < NUM_PLOTS; ++i) { */
-        /*         struct Plot_Metadata plot = plot_meta.plots[i]; */
-        /*         for (int x = 0; x < plot.signal.size; ++x) { */
-        /*             plot.signal.data[x] = plot.func(x); */
-        /*         } */
-        /*     } */
-        /* } */
+        /* End Update */
 
-        /* Draw */
         BeginDrawing();
         
         ClearBackground(RAYWHITE);
@@ -809,19 +764,19 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, &plot_meta.volume_envelope, RED);
+            DrawPlot(r, &plot_meta.volume_envelope);
 
             r.y += r.height + 2;
-            DrawPlot(r, &plot_meta.modulation_envelope, RED);
+            DrawPlot(r, &plot_meta.modulation_envelope);
 
-            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed, RED);
+            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed);
 
             r.y += r.height + 2;
             r.height /= 2;
-            DrawPlot(r, &plot_meta.pitch_lfo, RED);
+            DrawPlot(r, &plot_meta.pitch_lfo);
 
             r.y += r.height + 2;
-            DrawPlot(r, &plot_meta.volume_lfo, RED);
+            DrawPlot(r, &plot_meta.volume_lfo);
         } break;
         case OSCILLATOR: {
             for (int i = 0; i < OSCILLATOR_LEN; ++i) {
@@ -834,13 +789,13 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, &plot_meta.oscillator_a, RED);
+            DrawPlotSimple(r, &plot_meta.oscillator_a);
 
             r.y += r.height + 2;
-            DrawPlot(r, &plot_meta.oscillator_b, RED);
+            DrawPlotSimple(r, &plot_meta.oscillator_b);
 
             r.x += r.width + 2;
-            DrawPlot(r, &plot_meta.mixed, RED);
+            DrawPlot(r, &plot_meta.mixed);
         } break;
         case FILTER: {
             for (int i = 0; i < FILTER_LEN; ++i) {
@@ -853,19 +808,19 @@ int main(int argc, char *argv[]) {
             r.width = 300;
             r.height = 300;
             
-            DrawPlot(r, &plot_meta.filter, RED);
+            DrawPlot(r, &plot_meta.filter);
 
             r.y += r.height + 2;
-            DrawPlot(r, &plot_meta.saturation, RED);
+            DrawPlot(r, &plot_meta.saturation);
 
-            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed, RED);
+            DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed);
 
             r.y += r.height + 2;
             r.height /= 2;
-            DrawPlot(r, &plot_meta.reverb, RED);
+            DrawPlot(r, &plot_meta.reverb);
 
             r.y += r.height + 2;
-            DrawPlot(r, &plot_meta.adjust, RED);
+            DrawPlot(r, &plot_meta.adjust);
         } break;
         case MIXED: {
             r.x = 2;
@@ -873,8 +828,8 @@ int main(int argc, char *argv[]) {
             r.width = screenWidth - 4;
             r.height = screenHeight - 24;
 
-            DrawPlot(r, &plot_meta.mixed, RED);
-        } break;
+            DrawPlot(r, &plot_meta.mixed);
+                    } break;
         case OPTIONS: {
             Rectangle r = {.x = 2, .y = 24, .width = 20, .height = 20};
             GuiDrawText("Options", (Rectangle) {.x = r.x, .y=r.y, .width=200, .height=20}, 0, GRAY);
@@ -890,15 +845,17 @@ int main(int argc, char *argv[]) {
         EndDrawing();
     }
 
-    write_params(filepath);
+    if (options.export_params) {
+        write_params(filepath);
+    }
 
     if (options.export_wav) {
-        short *data = malloc((int)sample_rate*length_seconds*sizeof(short));
+        const int len = (int)(sample_rate*length_seconds);
+        short *data = malloc(len*sizeof(short));
         float x = 0.0f;
-        for (int i = 0; i < (int)(length_seconds*sample_rate); ++i) {
+        for (int i = 0; i < len; ++i) {
             data[i] = (short)(chain(x)*32000.0f);
             x += 1.0f / sample_rate;
-            if (x > 1.0f) x -= 1.0f;
         }
 
         Wave wave = {
@@ -906,7 +863,7 @@ int main(int argc, char *argv[]) {
             .sampleSize = (unsigned int)sample_size,
             .channels = (unsigned int)channels,
             .data = (void *)data,
-            .frameCount = length_seconds*sample_rate,
+            .frameCount = len,
         };
 
         if (ExportWave(wave, "out.wav")) {
