@@ -7,7 +7,6 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
-
 #define MAX_SAMPLES_PER_UPDATE   4096
 
 #define TO_STR(x) #x
@@ -469,7 +468,7 @@ float chain(float x) {
     float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
     // 2.0f goes with a_mod/b_mod => 2a_mod - 1 or 2b_mod - 1
-    float mod_partial = 2.0f * mod_depth * mod_env * fmodf(x, 4.0f); // I divide x by four in modulation_envelope, and it's original range was zero to one
+    float mod_partial = 2.0f * mod_depth * mod_env * fmodf(x, 4.0f); // I divide x by four in modulation_envelope, and its original range was zero to one
     float mod_env_a = mod_partial * (params.a_mod - 0.5f);
     float mod_env_b = mod_partial * (params.b_mod - 0.5f);
     float pitch_partial = frequency * x;
