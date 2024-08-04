@@ -165,10 +165,60 @@ union Params {
             float adj_treb;
             float adj_pan;
             float adj_clip;
-            float params_len;
         };
     };
 } params = {{0}};
+
+const union Params params_default = {
+    .env_time = 0.5f,
+    .env_loop = 0.5f,
+    .env_tilt = 0.5f,
+    .env_kf = 0.5f,
+    .vol_atk = 0.5f,
+    .vol_dcy = 0.5f,
+    .vol_sus = 0.5f,
+    .vol_fade = 0.5f,
+    .mod_atk = 0.5f,
+    .mod_dcy = 0.5f,
+    .mod_sh = 0.5f,
+    .mod_vel = 0.5f,
+    .lfo_rate = 0.5f,
+    .lfo_amt = 0.5f,
+    .lfo_bal = 0.5f,
+    .lfo_dly = 0.5f,
+    .a_form = 0.5f,
+    .a_noise = 0.5f,
+    .a_mod = 0.5f,
+    .a_color = 0.5f,
+    .a_freq = 0.5f,
+    .fm_mod = 0.5f,
+    .fm_amt = 0.5f,
+    .mix_mod = 0.5f,
+    .osc_mix = 0.7937005260f,
+    .b_form = 0.5f,
+    .b_noise = 0.5f,
+    .b_mod = 0.5f,
+    .sub_am = 0.5f,
+    .b_freq = 0.6875f,
+    .b_sh = 0.5f,
+    .flt_type = 2.0f/3.0f,
+    .flt_q = 0.5f,
+    .flt_mod = 0.5f,
+    .flt_sep = 0.5f,
+    .flt_freq = 0.75f,
+    .flt_kf = 0.5f,
+    .saturate = 0.5f,
+    .rvb_mix = 0.5f,
+    .rvb_atk = 0.5f,
+    .rvb_len = 0.5f,
+    .rvb_damp = 0.5f,
+    .rvb_chor = 0.5f,
+    .rvb_size = 0.5f,
+    .adj_bass = 0.5f,
+    .adj_treb = 0.5f,
+    .adj_pan = 0.5f,
+    .adj_clip = 0.5f,
+};
 
 const char *envelope_tostr(enum Envelope_Parameters p) {
     switch (p) {
@@ -414,6 +464,7 @@ float oscillator_b(float x) { return oscillator(x, params.b_form); }
 float chain(float x) {
     float mod_depth = 50.0f;
     float mod_env = modulation_envelope(x);
+    float p_lfo = pitch_lfo(x);
     float a_freq = params.a_freq < 0.5 ? params.a_freq + 0.5f : 2.0f * params.a_freq;
     float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
@@ -422,9 +473,9 @@ float chain(float x) {
     float mod_env_a = mod_partial * (params.a_mod - 0.5f);
     float mod_env_b = mod_partial * (params.b_mod - 0.5f);
     float pitch_partial = frequency * x;
-    float pitch_a = a_freq * pitch_partial + mod_env_a;
-    float pitch_b = b_freq * pitch_partial + mod_env_b;
-    float sub_pitch = (frequency * b_freq / 2.0f) * x + mod_env_b;
+    float pitch_a = p_lfo + a_freq * pitch_partial + mod_env_a;
+    float pitch_b = p_lfo + b_freq * pitch_partial + mod_env_b;
+    float sub_pitch = p_lfo + (frequency * b_freq / 2.0f) * x + mod_env_b;
     float sub_am = clampf((params.sub_am - 0.35) / 0.65f, 0.0f, 1.0f);
     
     float a = oscillator_a(pitch_a);
@@ -481,16 +532,20 @@ union Plots {
 };
 
 void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta) {
+    bounds.height -= 13.0f;
     GuiDrawRectangle(bounds, 1, BLACK, RAYWHITE);
     DrawText(meta->name, bounds.x + 2, bounds.y + 2, 10, GRAY);
-    GuiSliderBar((Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height - 13, .width = 100, .height = 10 },
-                 "-", TextFormat("(w) %.4f", meta->seconds_per_plot), &meta->seconds_per_plot, 0.001f, length_seconds);
+    Rectangle zoom_rect = (Rectangle){ .x = bounds.x + 12, .y = bounds.y + bounds.height + 2, .width = 100, .height = 10 };
+    GuiSliderBar(zoom_rect, "-", TextFormat("(w) %.4f", meta->seconds_per_plot), &meta->seconds_per_plot, 0.001f, length_seconds);
 
     float h_offset = bounds.y + bounds.height;
     float h_ratio = bounds.height / 4.0f;
     float seconds_per_pixel = meta->seconds_per_plot / bounds.width;
     float end = fmodf(time_seconds, meta->seconds_per_plot) / seconds_per_pixel;
     float start = time_seconds - fmodf(time_seconds, meta->seconds_per_plot);
+    float new_time = -1.0f;
+
+
     
     Vector2 mp = GetMousePosition();
     int mx = (int)mp.x;
@@ -499,18 +554,22 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta) {
         int xpos = mx + 1;
         int i = mx - (int)bounds.x;
         int fontsize = 10;
+        float time_at_cursor = start + i*seconds_per_pixel;
         if (IsKeyDown(KEY_LEFT_SHIFT)) {
             fontsize = 20;
         }
 
-        float value_at_point = meta->func(start + i*seconds_per_pixel);
-        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", (time_seconds - fmodf(time_seconds, meta->seconds_per_plot)) + i*seconds_per_pixel, value_at_point, i, (int)h_offset - my - 1);
+        if (IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+            new_time = time_at_cursor;
+        }
+
+        float value_at_point = meta->func(time_at_cursor);
+        const char *t = TextFormat("(%.3fs, %.3f) (%d, %d)", time_at_cursor, value_at_point, i, (int)h_offset - my - 1);
         int len = MeasureText(t, fontsize);
 
         int ypos = my - fontsize;
         if (ypos < bounds.y + 1) ypos = bounds.y + 1;
-        if (i <= end)
-            DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
+        DrawLine(xpos, my, xpos, clampf(h_offset - h_ratio*(value_at_point + meta->h_shift), bounds.y, h_offset), GREEN);
         
         xpos = xpos + len > bounds.x + bounds.width - 1 ? bounds.x + bounds.width - 1 - len : xpos;
         DrawText(t, xpos, ypos, fontsize, GRAY);
@@ -525,6 +584,10 @@ void DrawPlot(Rectangle bounds, struct Plot_Metadata *meta) {
         v = (Vector2){ .x = bounds.x + i, .y = clampf(h_offset - h_ratio*y, bounds.y, h_offset) };
 
         DrawLineEx(pv, v, 2, i < end ? RED : (Color) { .r = RED.r, .g = RED.g, .b = RED.g, .a = 32 });
+    }
+
+    if (new_time != -1.0f) {
+        time_seconds = new_time;
     }
 }
 
@@ -595,62 +658,69 @@ int main(int argc, char *argv[]) {
             .name = "Volume Envelope",
             .func = volume_envelope,
             .seconds_per_plot = length_seconds,
+            .h_shift = 1.5f,
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
             .func = modulation_envelope,
             .seconds_per_plot = length_seconds,
+            .h_shift = 1.5f,
         },
         .pitch_lfo =  {
             .name = "Pitch LFO",
             .func = pitch_lfo,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         },
         .volume_lfo =  {
             .name = "Volume LFO",
             .func = volume_lfo,
             .seconds_per_plot = length_seconds,
+            .h_shift = 1.0f,
         },
         .oscillator_a =  {
             .name = "Oscillator A",
             .func = oscillator_a,
             .seconds_per_plot = 1 / frequency,
+            .h_shift = 2.0f,
         },
         .oscillator_b =  {
             .name = "Oscillator B",
             .func = oscillator_b,
             .seconds_per_plot = 1 / frequency,
+            .h_shift = 2.0f,
         },
         .filter = {
             .name = "Filter",
             .func = identity,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         },
         .saturation = {
             .name = "Saturation",
             .func = identity,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         },
         .reverb = {
             .name = "Reverb",
             .func = identity,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         },
         .adjust = {
             .name = "Adjust",
             .func = identity,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         },
         .mixed = {
             .name = "Mixed",
             .func = chain,
             .seconds_per_plot = length_seconds,
+            .h_shift = 2.0f,
         }
     };
-
-    for (int i = 0; i < NUM_PLOTS; ++i) {
-        plot_meta.plots[i].h_shift = 2.0f;
-    }
 
     enum Page page = MIXED;
     bool playing = false;
@@ -759,6 +829,10 @@ int main(int argc, char *argv[]) {
                 GuiSlider(r, TextFormat("%.2f", params.env[i]), envelope_tostr(i), &params.env[i], 0.0f, 1.0f);
             }
 
+            if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
+                params = params_default;
+            } 
+
             r.x = r.width*2;
             r.y = top.y + 22;
             r.width = 300;
@@ -784,6 +858,10 @@ int main(int argc, char *argv[]) {
                 GuiSlider(r, TextFormat("%.2f", params.osc[i]), oscillator_tostr(i), &params.osc[i], 0.0f, 1.0f);
             }
 
+            if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
+                params = params_default;
+            } 
+
             r.x = r.width*2;
             r.y = top.y + 22;
             r.width = 300;
@@ -802,6 +880,10 @@ int main(int argc, char *argv[]) {
                 r.y += 22;
                 GuiSlider(r, TextFormat("%.2f", params.fil[i]), filter_tostr(i), &params.fil[i], 0.0f, 1.0f);
             }
+
+            if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
+                params = params_default;
+            } 
 
             r.x = r.width*2;
             r.y = top.y + 22;
