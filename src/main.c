@@ -355,13 +355,17 @@ typedef struct {
 } Signal;
 
 float volume_envelope(float x) {
-    x /= 4.0f;
+    float x_1 = x / (18.0f * (params.env_time + 0.1f));
+    float result = 1.0f;
+
+    if (params.env_loop <= params.env_time) {
+        x_1 = x / (18.0f * (params.env_loop + 0.1f));
+        result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
+        x_1 -= floor(x_1);
+    }
+    
     float vol_fade = 1.0f;
     if (params.vol_fade >= 0.75f) vol_fade = (4.0f * params.vol_fade - 3) * -x + 1.0f;
-
-    float a = x / sqrtf(params.env_loop);
-    float x_periodic = (a - floor(a)) / params.env_time;
-    x /= params.env_time;
 
     float env_tilt = powf(params.env_tilt, 4.0f);
 
@@ -370,13 +374,10 @@ float volume_envelope(float x) {
         vol_sus = 2.0f * params.vol_sus - 1.0f;
     }
 
-    if (params.env_loop <= params.env_time) x = x_periodic;
-    
-    float result = 0.0f;
-    if (x >= 0 && x <= env_tilt) {
-        result = powf(x/env_tilt, powf(0.5 + params.vol_atk, 15.0f)) * (1.0f - vol_sus) + vol_sus;
+    if (x_1 >= 0 && x_1 <= env_tilt) {
+        result *= powf(x_1/env_tilt, powf(0.5 + params.vol_atk, 15.0f)) * (1.0f - vol_sus) + vol_sus;
     } else {
-        result = 1 - powf((x - env_tilt)/(1 - env_tilt), powf(0.5 + params.vol_dcy, 15.0f)) * (1.0f - vol_sus) + vol_sus;;
+        result *= 1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.vol_dcy, 15.0f)) * (1.0f - vol_sus) + vol_sus;
     }
     
     result *= vol_fade;
@@ -384,24 +385,33 @@ float volume_envelope(float x) {
     return clampf(result, 0.0f, 1.0f);
 }
 
-float modulation_envelope(float x) {
-    x /= 4.0f;
-    float a = x / sqrtf(params.env_loop);
-    float x_periodic = (a - floor(a)) / params.env_time;
-    x /= params.env_time;
+float _modulation_envelope(float x, bool is_drawing) {
+    float x_1 = x / (18.0f * (params.env_time + 0.1f));
+    float result = 1.0f;
+
+    if (params.env_loop <= params.env_time) {
+        x_1 = x / (18.0f * (params.env_loop + 0.1f));
+        result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
+        x_1 -= floor(x_1);
+    }
     
     float env_tilt = powf(params.env_tilt, 4.0f);
 
-    if (params.env_loop <= params.env_time) x = x_periodic;
-
-    float result = 0.0f;
-    if (x >= 0 && x <= env_tilt) {
-        result = powf(x/env_tilt, powf(0.5 + (1.0f - params.mod_atk), 15.0f));
+    if (x_1 >= 0 && x_1 <= env_tilt) {
+        result *= powf(x_1/env_tilt, powf(0.5 + (1.0f - params.mod_atk), 15.0f));
     } else {
-        result = 1 - powf((x - env_tilt)/(1 - env_tilt), powf(0.5 + params.mod_dcy, 15.0f));
+        result *= 1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.mod_dcy, 15.0f));
     }
 
-    return clampf(result, 0.0f, 1.0f);
+    return clampf(result, 0.0f, 1.0f) * (is_drawing ? 1.0f : x_1);
+}
+
+float modulation_envelope_draw(float x) {
+    return _modulation_envelope(x, true);
+}
+
+float modulation_envelope(float x) {
+    return _modulation_envelope(x, false);
 }
 
 float pitch_lfo(float x) {
@@ -412,7 +422,8 @@ float pitch_lfo(float x) {
         * tanhf(fabsf(x) / (5.0f * params.lfo_dly + FLT_EPSILON))
         * (params.lfo_bal < 0.5f ? 1.0f : -2.0f * params.lfo_bal + 2.0f);
 
-    float wave = sinf(TAU * x * powf(1.0f + 4.0f*params.lfo_rate, 2.0f));
+    x *= powf(1.0f + 4.0f*params.lfo_rate, 2.0f);
+    float wave = sinf(TAU * x);
 
     return amplitude * wave;
 }
@@ -461,19 +472,19 @@ float oscillator_a(float x) { return oscillator(x, params.a_form); }
 float oscillator_b(float x) { return oscillator(x, params.b_form); }
 
 float chain(float x) {
-    float mod_depth = 50.0f;
+    float mod_depth = 100.0f;
     float mod_env = modulation_envelope(x);
     float p_lfo = pitch_lfo(x);
     float a_freq = params.a_freq < 0.5 ? params.a_freq + 0.5f : 2.0f * params.a_freq;
     float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
     // 2.0f goes with a_mod/b_mod => 2a_mod - 1 or 2b_mod - 1
-    float mod_partial = 2.0f * mod_depth * mod_env * fmodf(x, 4.0f); // I divide x by four in modulation_envelope, and its original range was zero to one
+    float mod_partial = 2.0f * mod_depth * mod_env;
     float mod_env_a = mod_partial * (params.a_mod - 0.5f);
     float mod_env_b = mod_partial * (params.b_mod - 0.5f);
     float pitch_partial = frequency * x;
-    float pitch_a = p_lfo + a_freq * pitch_partial + mod_env_a;
-    float pitch_b = p_lfo + b_freq * pitch_partial + mod_env_b;
+    float pitch_a = p_lfo + mod_env_a + a_freq * pitch_partial;
+    float pitch_b = p_lfo + mod_env_b + b_freq * pitch_partial;
     float sub_pitch = p_lfo + (frequency * b_freq / 2.0f) * x + mod_env_b;
     float sub_am = clampf((params.sub_am - 0.35) / 0.65f, 0.0f, 1.0f);
     
@@ -485,7 +496,7 @@ float chain(float x) {
     
     float waveform = (1.0f - osc_mix) * a + osc_mix * b;
 
-    float volume = volume_envelope(x) * volume_lfo(x);
+    float volume = /* volume_envelope(x) * */ volume_lfo(x);
     
     return volume * waveform;
 }
@@ -661,7 +672,7 @@ int main(int argc, char *argv[]) {
         },
         .modulation_envelope = {
             .name = "Modulation Envelope",
-            .func = modulation_envelope,
+            .func = modulation_envelope_draw,
             .seconds_per_plot = length_seconds,
             .h_shift = 1.5f,
         },
