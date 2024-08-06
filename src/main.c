@@ -3,6 +3,8 @@
 #include <math.h>           // Required for: sinf()
 #include <stdlib.h>
 
+#include "randq.h"
+
 #include "raylib.h"
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
@@ -339,6 +341,19 @@ void read_params(const char *filepath) {
     fclose(fp);
 }
 
+float get_whitenoise(void) {
+    return ((float)randq64_double()*2.0f - 1.0f);
+}
+
+float get_brownnoise(void) {
+    static float SmoothData = 0.0f;
+    const float LPF_Beta = 0.025f;
+        
+    float RawData = get_whitenoise();
+	SmoothData -= LPF_Beta * (SmoothData - RawData); // RC Filter
+    return SmoothData;
+}
+
 float clampf(float x, float min, float max) {
     if (x < min) return min;
     else if (x > max) return max;
@@ -348,11 +363,6 @@ float clampf(float x, float min, float max) {
 float identity(float x) { return x; }
 float map(float x, float in_min, float in_max, float out_min, float out_max) { return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min; }
 float midi_to_hz(float midi) { return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f; }
-
-typedef struct {
-    float *data;
-    unsigned int size;
-} Signal;
 
 float volume_envelope(float x) {
     float x_1 = x / (18.0f * (params.env_time + 0.1f));
@@ -478,26 +488,37 @@ float chain(float x) {
     float a_freq = params.a_freq < 0.5 ? params.a_freq + 0.5f : 2.0f * params.a_freq;
     float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
-    // 2.0f goes with a_mod/b_mod => 2a_mod - 1 or 2b_mod - 1
-    float mod_partial = 2.0f * mod_depth * mod_env;
-    float mod_env_a = mod_partial * (params.a_mod - 0.5f);
-    float mod_env_b = mod_partial * (params.b_mod - 0.5f);
+    float mod_partial = mod_depth * mod_env;
+    float mod_env_a = mod_partial * (2.0f * (params.a_mod - 0.5f));
+    float mod_env_b = mod_partial * (2.0f * (params.b_mod - 0.5f));
     float pitch_partial = frequency * x;
     float pitch_a = p_lfo + mod_env_a + a_freq * pitch_partial;
     float pitch_b = p_lfo + mod_env_b + b_freq * pitch_partial;
     float sub_pitch = p_lfo + (frequency * b_freq / 2.0f) * x + mod_env_b;
     float sub_am = clampf((params.sub_am - 0.35) / 0.65f, 0.0f, 1.0f);
-    
-    float a = oscillator_a(pitch_a);
-    float b = (oscillator_b(pitch_b) + sub_am * sinf(TAU * sub_pitch)) / map(sub_am, 0.0f, 1.0f, 1.0f, 2.0f);
 
-    /* float mix_mod_amt = (2.0f * params.mix_mod - 1.0f) * mod_env; */
-    float osc_mix = cbrtf(params.osc_mix);
+    float a_noise_amp = params.a_noise < 0.75 ? 0.0f : map(params.a_noise, 0.75f, 1.0f, 0.0f, 1.0f);
+    float b_noise_amp = params.b_noise < 0.75 ? 0.0f : map(params.b_noise, 0.75f, 1.0f, 0.0f, 1.0f);
+    float a_noise = ((1.0f - params.a_color) * get_brownnoise() + params.a_color * get_whitenoise());
+    float b_noise = get_whitenoise();
+
+    float osc_a = oscillator_a(pitch_a);
+    float a = clampf((1 - a_noise_amp) * osc_a + a_noise_amp * a_noise, -1.0f, 1.0f);
+
+    float osc_b = (oscillator_b(pitch_b) + sub_am * sinf(TAU * sub_pitch)) / map(sub_am, 0.0f, 1.0f, 1.0f, 2.0f);
+    float b = clampf((1 - b_noise_amp) * osc_b + b_noise_amp * b_noise, -1.0f, 1.0f);
+
+    float mix_mod = powf(2.0f * (params.mix_mod - 0.5f), 3.0f);
+    float osc_mix = powf(params.osc_mix, 3.0f);
+    float mix =
+        mix_mod > 0.0f
+        ? (1.0f - mix_mod) * osc_mix + mix_mod * powf(mod_env, 3.0f)
+        : (1.0f + mix_mod) * osc_mix + mix_mod * powf(mod_env, 3.0f) - mix_mod;
     
-    float waveform = (1.0f - osc_mix) * a + osc_mix * b;
+    float waveform = (1.0f - mix) * a + mix * b;
 
     float volume = /* volume_envelope(x) * */ volume_lfo(x);
-    
+
     return volume * waveform;
 }
 
