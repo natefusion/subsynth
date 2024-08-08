@@ -366,12 +366,15 @@ float map(float x, float in_min, float in_max, float out_min, float out_max) { r
 float midi_to_hz(float midi) { return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f; }
 
 float volume_envelope(float x) {
-    float x_1 = x / (envelope_time * (params.env_time + 0.1f));
+    float env_time = powf(params.env_time, 4.0f);
+    float env_loop = powf(params.env_loop, 4.0f);
+
+    float x_1 = x / (envelope_time * (env_time + 0.1f));
     float result = 1.0f;
 
-    if (params.env_loop <= params.env_time) {
-        x_1 = x / (envelope_time * (params.env_loop + 0.1f));
-        result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
+    if (env_loop <= env_time) {
+        x_1 = x / (envelope_time * (env_loop + 0.1f));
+        result = expf(-floor(x_1) / powf(1.0f + (env_time - env_loop), 10.0f));
         x_1 -= floor(x_1);
     }
     
@@ -386,11 +389,11 @@ float volume_envelope(float x) {
     }
 
     if (x_1 >= 0 && x_1 <= env_tilt) {
-        result *= powf(x_1/env_tilt, powf(0.5 + params.vol_atk, 15.0f)) * (1.0f - vol_sus) + vol_sus;
+        result *= powf(x_1/env_tilt, powf(1.5 - params.vol_atk, 6.0f)) * (1.0f - vol_sus) + vol_sus;
     } else {
-        result *= 1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.vol_dcy, 15.0f)) * (1.0f - vol_sus) + vol_sus;
+        result *= (1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.vol_dcy, 6.0f))) * (1.0f - vol_sus) + vol_sus;
     }
-    
+
     result *= vol_fade;
 
     return clampf(result, 0.0f, 1.0f);
@@ -405,21 +408,24 @@ float _modulation_envelope(float x, bool is_drawing) {
     float mod_sh = params.mod_sh < 0.8f ? 0.0f : 2.0f * map(params.mod_sh, 0.8f, 1.0f, 0.0f, 1.0f);
     x = sample_and_hold(x, mod_sh);
 
-    float x_1 = x / (envelope_time * (params.env_time + 0.1f));
+    float env_time = powf(params.env_time, 4.0f);
+    float env_loop = powf(params.env_loop, 4.0f);
+
+    float x_1 = x / (envelope_time * (env_time + 0.1f));
     float result = 1.0f;
 
-    if (params.env_loop <= params.env_time) {
-        x_1 = x / (envelope_time * (params.env_loop + 0.1f));
-        result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
+    if (params.env_time >= params.env_loop) {
+        x_1 = x / (envelope_time * (env_loop + 0.1f));
+        result = expf(-floor(x_1) / powf(1.0f + (env_time - env_loop), 10.0f));
         x_1 -= floor(x_1);
     }
     
     float env_tilt = powf(params.env_tilt, 4.0f);
 
     if (x_1 >= 0 && x_1 <= env_tilt) {
-        result *= powf(x_1/env_tilt, powf(0.5 + (1.0f - params.mod_atk), 15.0f));
+        result *= powf(x_1/env_tilt, powf(1.5 - params.mod_atk, 6.0f));
     } else {
-        result *= 1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.mod_dcy, 15.0f));
+        result *= 1 - powf((x_1 - env_tilt)/(1 - env_tilt), powf(0.5 + params.mod_dcy, 6.0f));
     }
 
     return clampf(result, 0.0f, 1.0f) * (is_drawing ? 1.0f : x_1);
@@ -431,9 +437,23 @@ float modulation_envelope(float x)      { return _modulation_envelope(x, false);
 float pitch_lfo(float x) {
     x /= 4.0f;
 
+    float lfo_amt = 2.0f * (params.lfo_amt - 0.5f);
+    if (lfo_amt > 0.5f) {
+        lfo_amt = map(lfo_amt, 0.5f, 1.0f, 0.0f, 1.0f);
+    } else if (lfo_amt < -0.5f) {
+        lfo_amt = map(lfo_amt, -0.5f, -1.0f, 0.0f, -1.0f);
+    } else {
+        lfo_amt = 0.0f;
+    }
+
+    float lfo_dly = 0.0f;
+    if (params.lfo_dly > 0.5f) {
+        lfo_dly = powf(map(params.lfo_dly, 0.5f, 1.0f, 0.0f, 1.0f), 3.0f);
+    }
+
     float amplitude =
-        4.0f * powf((params.lfo_amt - 0.5f), 2.0f)
-        * tanhf(fabsf(x) / (5.0f * params.lfo_dly + FLT_EPSILON))
+        lfo_amt
+        * tanhf(fabsf(x) / (5.0f * lfo_dly + FLT_EPSILON))
         * (params.lfo_bal < 0.5f ? 1.0f : -2.0f * params.lfo_bal + 2.0f);
 
     x *= powf(1.0f + 4.0f*params.lfo_rate, 2.0f);
@@ -443,17 +463,31 @@ float pitch_lfo(float x) {
 }
 
 float volume_lfo(float x) {
-    x /= 2.0f;
+    x /= 4.0f;
+    float lfo_amt = 2.0f * (params.lfo_amt - 0.5f);
+    if (lfo_amt > 0.5f) {
+        lfo_amt = map(lfo_amt, 0.5f, 1.0f, 0.0f, 1.0f);
+    } else if (lfo_amt < -0.5f) {
+        lfo_amt = map(lfo_amt, -0.5f, -1.0f, 0.0f, -1.0f);
+    } else {
+        lfo_amt = 0.0f;
+    }
+
+    float lfo_dly = 0.0f;
+    if (params.lfo_dly > 0.5f) {
+        lfo_dly = powf(map(params.lfo_dly, 0.5f, 1.0f, 0.0f, 1.0f), 3.0f);
+    }
+
     float amplitude =
-        1.2f * powf(2.0f * (params.lfo_amt - 0.5f), 2.0f)
+        1.2f * powf(lfo_amt, 2.0f)
         * powf(params.lfo_bal < 0.5f ? 2.0f * params.lfo_bal : 1.0f, 2.0f)
-        * tanhf(fabsf(x) / (5.0f * params.lfo_dly))
+        * tanhf(fabsf(x) / (5.0f * lfo_dly))
         * (params.lfo_bal > 0.5f ? 1.0f : 2.0f * params.lfo_bal);
     
     x *= powf((1.0f + 4.0f*params.lfo_rate), 2.0f);
     float triangle = 4.0f * fabsf(x - floorf(x + 0.5f)) - 0.5f;
 
-    float shift1 = -2.0f * fabsf(params.lfo_amt - 0.5f) + 1.0f;
+    float shift1 = -fabsf(lfo_amt) + 1.0f;
     float shift2 = params.lfo_bal < 0.5f ? -2.0f * params.lfo_bal + 1 : 0.0f;
 
     return clampf(amplitude * triangle + shift1 + shift2, 0.0f, 1.0f);
@@ -494,13 +528,7 @@ float oscillator_b(float x) {
 
 float chain(float x) {
     float env_kf = params.env_kf >= 0.5f ? 2.0f * (params.env_kf - 0.5f) : 0.0f;
-    float time_multiplier
-        = midi_f0 > 32
-        ? 20.0f * (-env_kf + 1.0f)
-        : midi_f0 < 32
-        ? 20.0f * (powf(env_kf, 2.0f) + 1.0f)
-        : 20.0f;
-    envelope_time = time_multiplier * 3615 * powf(frequency, -2.0f);
+    envelope_time = 20.0f * ((1.0f - env_kf) + env_kf * 2694.97f * powf(frequency, -2.0f));
 
     float mod_env = modulation_envelope(x);
     float p_lfo = pitch_lfo(x);
@@ -537,7 +565,7 @@ float chain(float x) {
     
     float waveform = (1.0f - mix) * a + mix * b;
 
-    float volume = /* volume_envelope(x) * */ volume_lfo(x);
+    float volume = volume_envelope(x) * volume_lfo(x);
 
     return volume * waveform;
 }
@@ -888,10 +916,12 @@ int main(int argc, char *argv[]) {
             r.y = top.y + 22;
             r.width = 300;
             r.height = 300;
-            
+
+            plot_meta.volume_envelope.seconds_per_plot = envelope_time;
             DrawPlot(r, &plot_meta.volume_envelope);
 
             r.y += r.height + 2;
+            plot_meta.modulation_envelope.seconds_per_plot = envelope_time;
             DrawPlot(r, &plot_meta.modulation_envelope);
 
             DrawPlot((Rectangle) { r.x + r.width + 2, r.y, r.width, r.height}, &plot_meta.mixed);
