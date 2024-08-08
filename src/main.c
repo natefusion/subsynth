@@ -23,6 +23,7 @@ float length_seconds = 16.0f;
 float time_seconds = 0.0f;
 float chain_idx = 0.0f;
 float volume = 0.2f;
+float envelope_time = 20.0f;
 int screenWidth = 1000;
 int screenHeight = 1000;
 int sample_size = 16;
@@ -365,11 +366,11 @@ float map(float x, float in_min, float in_max, float out_min, float out_max) { r
 float midi_to_hz(float midi) { return powf(2.0f, (midi - 69.0f)/12.0f) * 440.0f; }
 
 float volume_envelope(float x) {
-    float x_1 = x / (18.0f * (params.env_time + 0.1f));
+    float x_1 = x / (envelope_time * (params.env_time + 0.1f));
     float result = 1.0f;
 
     if (params.env_loop <= params.env_time) {
-        x_1 = x / (18.0f * (params.env_loop + 0.1f));
+        x_1 = x / (envelope_time * (params.env_loop + 0.1f));
         result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
         x_1 -= floor(x_1);
     }
@@ -395,12 +396,20 @@ float volume_envelope(float x) {
     return clampf(result, 0.0f, 1.0f);
 }
 
+float sample_and_hold(float x, float w) {
+    if (w == 0.0f) { return x; }
+    else           { return floorf(x / w) * w; }
+}
+
 float _modulation_envelope(float x, bool is_drawing) {
-    float x_1 = x / (18.0f * (params.env_time + 0.1f));
+    float mod_sh = params.mod_sh < 0.8f ? 0.0f : 2.0f * map(params.mod_sh, 0.8f, 1.0f, 0.0f, 1.0f);
+    x = sample_and_hold(x, mod_sh);
+
+    float x_1 = x / (envelope_time * (params.env_time + 0.1f));
     float result = 1.0f;
 
     if (params.env_loop <= params.env_time) {
-        x_1 = x / (18.0f * (params.env_loop + 0.1f));
+        x_1 = x / (envelope_time * (params.env_loop + 0.1f));
         result = expf(-floor(x_1) / powf(1.0f + (params.env_time - params.env_loop), 10.0f));
         x_1 -= floor(x_1);
     }
@@ -416,13 +425,8 @@ float _modulation_envelope(float x, bool is_drawing) {
     return clampf(result, 0.0f, 1.0f) * (is_drawing ? 1.0f : x_1);
 }
 
-float modulation_envelope_draw(float x) {
-    return _modulation_envelope(x, true);
-}
-
-float modulation_envelope(float x) {
-    return _modulation_envelope(x, false);
-}
+float modulation_envelope_draw(float x) { return _modulation_envelope(x, true); }
+float modulation_envelope(float x)      { return _modulation_envelope(x, false); }
 
 float pitch_lfo(float x) {
     x /= 4.0f;
@@ -479,15 +483,31 @@ float oscillator(float x, float form) {
 }
 
 float oscillator_a(float x) { return oscillator(x, params.a_form); }
-float oscillator_b(float x) { return oscillator(x, params.b_form); }
+
+float oscillator_b(float x) {
+    float b_sh = fabsf(2.0f * (params.b_sh - 0.5f));
+    b_sh = b_sh < 0.75f ? 0.0f : 0.125f * map(b_sh, 0.75f, 1.0f, 0.0f, 1.0f);
+    float new_x = sample_and_hold(x, b_sh);
+
+    return oscillator(new_x, params.b_form);
+}
 
 float chain(float x) {
-    float mod_depth = 100.0f;
+    float env_kf = params.env_kf >= 0.5f ? 2.0f * (params.env_kf - 0.5f) : 0.0f;
+    float time_multiplier
+        = midi_f0 > 32
+        ? 20.0f * (-env_kf + 1.0f)
+        : midi_f0 < 32
+        ? 20.0f * (powf(env_kf, 2.0f) + 1.0f)
+        : 20.0f;
+    envelope_time = time_multiplier * 3615 * powf(frequency, -2.0f);
+
     float mod_env = modulation_envelope(x);
     float p_lfo = pitch_lfo(x);
     float a_freq = params.a_freq < 0.5 ? params.a_freq + 0.5f : 2.0f * params.a_freq;
     float b_freq = a_freq * (0.03632f * powf(74.4159f, params.b_freq) + 0.2970f);
 
+    const float mod_depth = 100.0f;
     float mod_partial = mod_depth * mod_env;
     float mod_env_a = mod_partial * (2.0f * (params.a_mod - 0.5f));
     float mod_env_b = mod_partial * (2.0f * (params.b_mod - 0.5f));
