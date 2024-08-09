@@ -558,10 +558,11 @@ float chain(float x) {
 
     float mix_mod = powf(2.0f * (params.mix_mod - 0.5f), 3.0f);
     float osc_mix = powf(params.osc_mix, 3.0f);
+    float mod_env_3 = powf(mod_env, 3.0f);
     float mix =
         mix_mod > 0.0f
-        ? (1.0f - mix_mod) * osc_mix + mix_mod * powf(mod_env, 3.0f)
-        : (1.0f + mix_mod) * osc_mix + mix_mod * powf(mod_env, 3.0f) - mix_mod;
+        ? (1.0f - mix_mod) * osc_mix + mix_mod * mod_env_3
+        : (1.0f + mix_mod) * osc_mix + mix_mod * mod_env_3 - mix_mod;
     
     float waveform = (1.0f - mix) * a + mix * b;
 
