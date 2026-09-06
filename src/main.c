@@ -9,9 +9,7 @@
 #define RAYGUI_IMPLEMENTATION
 #include "raygui.h"
 
-#define MAX_SAMPLES_PER_UPDATE   4096
-
-#define TO_STR(x) #x
+#define MAX_SAMPLES_PER_UPDATE 4096
 
 #define TAU (2.0f*PI)
 
@@ -24,280 +22,120 @@ float time_seconds = 0.0f;
 float chain_idx = 0.0f;
 float volume = 0.2f;
 float envelope_time = 20.0f;
-int screenWidth = 1000;
+int screenWidth = 1500;
 int screenHeight = 1000;
 int sample_size = 16;
 int channels = 1;
 
-enum Envelope_Parameters {
-    ENV_TIME,
-    ENV_LOOP,
-    ENV_TILT,
-    ENV_KF,
-    VOL_ATK,
-    VOL_DCY,
-    VOL_SUS,
-    VOL_FADE,
-    MOD_ATK,
-    MOD_DCY,
-    MOD_SH,
-    MOD_VEL,
-    LFO_RATE,
-    LFO_AMT,
-    LFO_BAL,
-    LFO_DLY,
+#define PREFIX Parameters
 
-    ENVELOPE_LEN,
+#define PARAMETERS(P, X, Y) \
+Y(ENVELOPE_FIRST, P, env_time, 0.5f) \
+X(P, env_loop, 0.5f) \
+X(P, env_tilt, 0.5f) \
+X(P, env_kf, 0.5f) \
+X(P, vol_atk, 0.5f) \
+X(P, vol_dcy, 0.5f) \
+X(P, vol_sus, 0.5f) \
+X(P, vol_fade, 0.5f) \
+X(P, mod_atk, 0.5f) \
+X(P, mod_dcy, 0.5f) \
+X(P, mod_sh, 0.5f) \
+X(P, mod_vel, 0.5f) \
+X(P, lfo_rate, 0.5f) \
+X(P, lfo_amt, 0.5f) \
+X(P, lfo_bal, 0.5f) \
+Y(ENVELOPE_LAST, P, lfo_dly, 0.5f) \
+\
+Y(OSCILLATOR_FIRST, P, a_form, 0.5f) \
+X(P, a_noise, 0.5f) \
+X(P, a_mod, 0.5f) \
+X(P, a_color, 0.5f) \
+X(P, a_freq, 0.5f) \
+X(P, fm_mod, 0.5f) \
+X(P, fm_amt, 0.5f) \
+X(P, mix_mod, 0.5f) \
+X(P, osc_mix, 0.7937005260f) \
+X(P, b_form, 0.5f) \
+X(P, b_noise, 0.5f) \
+X(P, b_mod, 0.5f) \
+X(P, sub_am, 0.5f) \
+X(P, b_freq, 0.6875f) \
+Y(OSCILLATOR_LAST, P, b_sh, 0.5f) \
+\
+Y(FILTER_FIRST, P, flt_type,  2.0f/3.0f) \
+X(P, flt_q, 0.5f) \
+X(P, flt_mod, 0.5f) \
+X(P, flt_sep, 0.5f) \
+X(P, flt_freq, 0.75f) \
+X(P, flt_kf, 0.5f) \
+X(P, saturate, 0.5f) \
+X(P, rvb_mix, 0.5f) \
+X(P, rvb_atk, 0.5f) \
+X(P, rvb_len, 0.5f) \
+X(P, rvb_damp, 0.5f) \
+X(P, rvb_chor, 0.5f) \
+X(P, rvb_size, 0.5f) \
+X(P, adj_base, 0.5f) \
+X(P, adj_treb, 0.5f) \
+X(P, adj_pan, 0.5f) \
+Y(FILTER_LAST, P, adj_clip, 0.5f) \
+\
+Y(MISC_FIRST, P, misc_atk, 0.0f) \
+Y(MISC_LAST, P, misc_rel, 0.0f)
+
+#define X(prefix, name, default_value) prefix##name,
+#define Y(begin, prefix, name, default_value) begin, prefix##name = begin,
+enum Parameters { PARAMETERS(PREFIX, X, Y) PARAMS_LEN };
+#undef X
+#undef Y
+
+
+union Params {
+    float p[PARAMS_LEN];
+    struct {
+        #define X(prefix, name, default_value) float name;
+        #define Y(begin, prefix, name, default_value) float name;
+        PARAMETERS(PREFIX, X, Y)
+        #undef X
+        #undef Y
+    };
+} params = {{0}};
+
+const union Params params_default = {
+    #define X(prefix, name, default_value) .name = default_value,
+    #define Y(begin, prefix, name, default_value) .name = default_value,
+    PARAMETERS(PREFIX, X, Y)
+    #undef X
+    #undef Y
 };
 
-enum Oscillator_Parameters {
-    A_FORM,
-    A_NOISE,
-    A_MOD,
-    A_COLOR,
-    A_FREQ,
-    FM_MOD,
-    FM_AMT,
-    MIX_MOD,
-    OSC_MIX,
-    B_FORM,
-    B_NOISE,
-    B_MOD,
-    SUB_AM,
-    B_FREQ,
-    B_SH,
-
-    OSCILLATOR_LEN,
-};
-
-enum Filter_Parameters {
-    FLT_TYPE,
-    FLT_Q,
-    FLT_MOD,
-    FLT_SEP,
-    FLT_FREQ,
-    FLT_KF,
-    SATURATE,
-    RVB_MIX,
-    RVB_ATK,
-    RVB_LEN,
-    RVB_DAMP,
-    RVB_CHOR,
-    RVB_SIZE,
-    ADJ_BASS,
-    ADJ_TREB,
-    ADJ_PAN,
-    ADJ_CLIP,
-    
-    FILTER_LEN,
-};
+#define X(prefix, name, default_value) [prefix##name] = #name,
+#define Y(begin, prefix, name, default_value) [prefix##name] = #name,
+static const char *params_tostr[PARAMS_LEN] = { PARAMETERS(PREFIX, X, Y) };
+#undef X
+#undef Y
 
 enum Page {
   ENVELOPE,
   OSCILLATOR,
   FILTER,
+  MISC,
   MIXED,
   OPTIONS,
 };
 
-#define PARAMS_LEN ENVELOPE_LEN + OSCILLATOR_LEN + FILTER_LEN
-
-union Params {
-    float p[PARAMS_LEN];
-    
-    struct {
-        float env[ENVELOPE_LEN];
-        float osc[OSCILLATOR_LEN];
-        float fil[FILTER_LEN];
-    };
-
-    struct {
-        struct {
-            float env_time;
-            float env_loop;
-            float env_tilt;
-            float env_kf;
-            float vol_atk;
-            float vol_dcy;
-            float vol_sus;
-            float vol_fade;
-            float mod_atk;
-            float mod_dcy;
-            float mod_sh;
-            float mod_vel;
-            float lfo_rate;
-            float lfo_amt;
-            float lfo_bal;
-            float lfo_dly;
-        };
-
-        struct {
-            float a_form;
-            float a_noise;
-            float a_mod;
-            float a_color;
-            float a_freq;
-            float fm_mod;
-            float fm_amt;
-            float mix_mod;
-            float osc_mix;
-            float b_form;
-            float b_noise;
-            float b_mod;
-            float sub_am;
-            float b_freq;
-            float b_sh;
-        };
-
-        struct {
-            float flt_type;
-            float flt_q;
-            float flt_mod;
-            float flt_sep;
-            float flt_freq;
-            float flt_kf;
-            float saturate;
-            float rvb_mix;
-            float rvb_atk;
-            float rvb_len;
-            float rvb_damp;
-            float rvb_chor;
-            float rvb_size;
-            float adj_bass;
-            float adj_treb;
-            float adj_pan;
-            float adj_clip;
-        };
-    };
-} params = {{0}};
-
-const union Params params_default = {
-    .env_time = 0.5f,
-    .env_loop = 0.5f,
-    .env_tilt = 0.5f,
-    .env_kf = 0.5f,
-    .vol_atk = 0.5f,
-    .vol_dcy = 0.5f,
-    .vol_sus = 0.5f,
-    .vol_fade = 0.5f,
-    .mod_atk = 0.5f,
-    .mod_dcy = 0.5f,
-    .mod_sh = 0.5f,
-    .mod_vel = 0.5f,
-    .lfo_rate = 0.5f,
-    .lfo_amt = 0.5f,
-    .lfo_bal = 0.5f,
-    .lfo_dly = 0.5f,
-    .a_form = 0.5f,
-    .a_noise = 0.5f,
-    .a_mod = 0.5f,
-    .a_color = 0.5f,
-    .a_freq = 0.5f,
-    .fm_mod = 0.5f,
-    .fm_amt = 0.5f,
-    .mix_mod = 0.5f,
-    .osc_mix = 0.7937005260f,
-    .b_form = 0.5f,
-    .b_noise = 0.5f,
-    .b_mod = 0.5f,
-    .sub_am = 0.5f,
-    .b_freq = 0.6875f,
-    .b_sh = 0.5f,
-    .flt_type = 2.0f/3.0f,
-    .flt_q = 0.5f,
-    .flt_mod = 0.5f,
-    .flt_sep = 0.5f,
-    .flt_freq = 0.75f,
-    .flt_kf = 0.5f,
-    .saturate = 0.5f,
-    .rvb_mix = 0.5f,
-    .rvb_atk = 0.5f,
-    .rvb_len = 0.5f,
-    .rvb_damp = 0.5f,
-    .rvb_chor = 0.5f,
-    .rvb_size = 0.5f,
-    .adj_bass = 0.5f,
-    .adj_treb = 0.5f,
-    .adj_pan = 0.5f,
-    .adj_clip = 0.5f,
-};
-
-const char *envelope_tostr(enum Envelope_Parameters p) {
-    switch (p) {
-    case ENV_TIME: return "env_time";
-    case ENV_LOOP: return "env_loop";
-    case ENV_TILT: return "env_tilt";
-    case ENV_KF: return "env_kf";
-    case VOL_ATK: return "vol_atk";
-    case VOL_DCY: return "vol_dcy";
-    case VOL_SUS: return "vol_sus";
-    case VOL_FADE: return "vol_fade";
-    case MOD_ATK: return "mod_atk";
-    case MOD_DCY: return "mod_dcy";
-    case MOD_SH: return "mod_sh";
-    case MOD_VEL: return "mod_vel";
-    case LFO_RATE: return "lfo_rate";
-    case LFO_AMT: return "lfo_amt";
-    case LFO_BAL: return "lfo_bal";
-    case LFO_DLY: return "lfo_dly";
-    case ENVELOPE_LEN: return "";
+void set_default_params(int first, int last) {
+    for (int i = first; i <= last; ++i) {
+        params.p[i] = params_default.p[i];
     }
-    return "";
-}
-
-const char *oscillator_tostr(enum Oscillator_Parameters p) {
-    switch (p) {
-    case A_FORM: return "a_form";
-    case A_NOISE: return "a_noise";
-    case A_MOD: return "a_mod";
-    case A_COLOR: return "a_color";
-    case A_FREQ: return "a_freq";
-    case FM_MOD: return "fm_mod";
-    case FM_AMT: return "fm_amt";
-    case MIX_MOD: return "mix_mod";
-    case OSC_MIX: return "osc_mix";
-    case B_FORM: return "b_form";
-    case B_NOISE: return "b_noise";
-    case B_MOD: return "b_mod";
-    case SUB_AM: return "sub_am";
-    case B_FREQ: return "b_freq";
-    case B_SH: return "b_sh";
-    case OSCILLATOR_LEN: return "";
-    }
-    return "";
-}
-
-const char *filter_tostr(enum Filter_Parameters p) {
-    switch (p) {
-    case FLT_TYPE: return "flt_type";
-    case FLT_Q: return "flt_q";
-    case FLT_MOD: return "flt_mod";
-    case FLT_SEP: return "flt_sep";
-    case FLT_FREQ: return "flt_freq";
-    case FLT_KF: return "flt_kf";
-    case SATURATE: return "saturate";
-    case RVB_MIX: return "rvb_mix";
-    case RVB_ATK: return "rvb_atk";
-    case RVB_LEN: return "rvb_len";
-    case RVB_DAMP: return "rvb_damp";
-    case RVB_CHOR: return "rvb_choir";
-    case RVB_SIZE: return "rvb_size";
-    case ADJ_BASS: return "adj_bass";
-    case ADJ_TREB: return "adj_treb";
-    case ADJ_PAN: return "adj_pan";
-    case ADJ_CLIP: return "adj_clip";
-    case FILTER_LEN: return "";
-    }
-    return "";
 }
 
 void write_params(const char* filepath) {
     FILE *fp = fopen(filepath, "w");
     if (fp) {
         fputc('{', fp);
-        for (int i = 0; i < ENVELOPE_LEN; ++i)   fprintf(fp, ".%s = %.2f,", envelope_tostr(i), params.env[i]);
-        for (int i = 0; i < OSCILLATOR_LEN; ++i) fprintf(fp, ".%s = %.2f,", oscillator_tostr(i), params.osc[i]);
-        for (int i = 0; i < FILTER_LEN; ++i)     fprintf(fp, ".%s = %.2f,", filter_tostr(i), params.fil[i]);
+        for (int i = 0; i < PARAMS_LEN; ++i) fprintf(fp, ".%s = %.2f,", params_tostr[i], params.p[i]);
         fprintf(fp, "}\n");
         fclose(fp);
     } else {
@@ -807,9 +645,10 @@ int main(int argc, char *argv[]) {
 
     frequency = midi_to_hz(floorf(midi_f0));
 
+
+
     while (!WindowShouldClose()) {
         /* Begin Update */
-        
         if (IsFileDropped()) {
             FilePathList dropped_files = LoadDroppedFiles();
             if (dropped_files.count > 1) {
@@ -873,14 +712,14 @@ int main(int argc, char *argv[]) {
         Rectangle top = {.width = 100, .height = 20, .x = 30, .y = 2};
         Rectangle r = top;
 
-        GuiToggleGroup(r, "Envelope;Oscillator;Filter;Mixed", (int *)&page);
+        GuiToggleGroup(r, "Envelope;Oscillator;Filter;Misc;Mixed", (int *)&page);
 
         if (GuiButton((Rectangle){.width=26, .height = 20, .x = 2, .y = 2 }, "O")) {
             page = OPTIONS;
         }
 
         top.width = 100;
-        top.x = (2 + r.width)*4 + r.x + 30;
+        top.x = (2 + r.width)*5 + r.x + 30;
         
         GuiSlider(top, TextFormat("%.0f", midi_f0), "Frequency", &midi_f0, 0.0f, 127.0f);
         frequency = midi_to_hz(floorf(midi_f0));
@@ -904,13 +743,14 @@ int main(int argc, char *argv[]) {
 
         switch (page) {
         case ENVELOPE: {
-            for (int i = 0; i < ENVELOPE_LEN; ++i) {
+            for (int i = ENVELOPE_FIRST; i <= ENVELOPE_LAST; ++i) {
                 r.y += 22;
-                GuiSlider(r, TextFormat("%.2f", params.env[i]), envelope_tostr(i), &params.env[i], 0.0f, 1.0f);
+                GuiSlider(r, TextFormat("%.2f", params.p[i]), params_tostr[i], &params.p[i], 0.0f, 1.0f);
             }
 
             if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
-                params = params_default;
+                // TODO(FIXME) I don't think this works ...
+                set_default_params(ENVELOPE_FIRST, ENVELOPE_LAST);
             } 
 
             r.x = r.width*2;
@@ -935,13 +775,13 @@ int main(int argc, char *argv[]) {
             DrawPlot(r, &plot_meta.volume_lfo);
         } break;
         case OSCILLATOR: {
-            for (int i = 0; i < OSCILLATOR_LEN; ++i) {
+            for (int i = OSCILLATOR_FIRST; i <= OSCILLATOR_LAST; ++i) {
                 r.y += 22;
-                GuiSlider(r, TextFormat("%.2f", params.osc[i]), oscillator_tostr(i), &params.osc[i], 0.0f, 1.0f);
+                GuiSlider(r, TextFormat("%.2f", params.p[i]), params_tostr[i], &params.p[i], 0.0f, 1.0f);
             }
 
             if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
-                params = params_default;
+                set_default_params(OSCILLATOR_FIRST, OSCILLATOR_LAST);
             } 
 
             r.x = r.width*2;
@@ -958,13 +798,13 @@ int main(int argc, char *argv[]) {
             DrawPlot(r, &plot_meta.mixed);
         } break;
         case FILTER: {
-            for (int i = 0; i < FILTER_LEN; ++i) {
+            for (int i = FILTER_FIRST; i <= FILTER_LAST; ++i) {
                 r.y += 22;
-                GuiSlider(r, TextFormat("%.2f", params.fil[i]), filter_tostr(i), &params.fil[i], 0.0f, 1.0f);
+                GuiSlider(r, TextFormat("%.2f", params.p[i]), params_tostr[i], &params.p[i], 0.0f, 1.0f);
             }
 
             if (GuiButton((Rectangle) { .x = r.x, .y = r.y+22, .width=r.width, .height=r.height}, "Default Params")) {
-                params = params_default;
+                set_default_params(FILTER_FIRST, FILTER_LAST);
             } 
 
             r.x = r.width*2;
@@ -986,6 +826,12 @@ int main(int argc, char *argv[]) {
             r.y += r.height + 2;
             DrawPlot(r, &plot_meta.adjust);
         } break;
+        case MISC: {
+            for (int i = MISC_FIRST; i <= MISC_LAST; ++i) {
+                r.y += 22;
+                GuiSlider(r, TextFormat("%.2f", params.p[i]), params_tostr[i], &params.p[i], 0.0f, 1.0f);
+            }
+        } break;
         case MIXED: {
             r.x = 2;
             r.y = top.y + 22;
@@ -993,7 +839,7 @@ int main(int argc, char *argv[]) {
             r.height = screenHeight - 24;
 
             DrawPlot(r, &plot_meta.mixed);
-                    } break;
+        } break;
         case OPTIONS: {
             Rectangle r = {.x = 2, .y = 24, .width = 20, .height = 20};
             GuiDrawText("Options", (Rectangle) {.x = r.x, .y=r.y, .width=200, .height=20}, 0, GRAY);
@@ -1005,7 +851,6 @@ int main(int argc, char *argv[]) {
             GuiCheckBox(r, "Export params?", &options.export_params);
         } break;
         }
-
         EndDrawing();
     }
 
